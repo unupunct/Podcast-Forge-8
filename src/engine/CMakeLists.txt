@@ -8,5 +8,5 @@ add_library(pf8_engine STATIC
     DriftController.cpp
     Bridges.cpp
 )
-target_link_libraries(pf8_engine PUBLIC pf8_core pf8_devices PRIVATE avrt ole32)
+target_link_libraries(pf8_engine PUBLIC pf8_core pf8_devices pf8_routing PRIVATE avrt ole32)
 pf8_set_warnings(pf8_engine)

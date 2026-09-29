@@ -64,3 +64,20 @@
 - Master burst not covered by bridge targets (underruns at 128-frame devices) → `engineBurst`.
 - Bridges starting hundreds of frames high after late graph join → measured-fill priming.
 - Resampler read before its buffer when leaving passthrough → passthrough is master-only.
+
+## Stage 3 — Routing matrix (2026-09-29)
+
+**Added**
+- `src/routing`: `RoutingEngine` (12 sources × 13 buses, 10 ms matrix ramps, channel fader / pan /
+  mute, cough, pre- or post-fader headphone sends, HP modes Main / Personal / Custom with a 20 ms
+  crossfade, HP volume / mute, PFL, solo-in-place on the monitor only, monitor source / auto-PFL /
+  volume / dim / mono / mute, master fader / mute on Main and Clean, talkback lock + targets + dim),
+  `RoutingParams` (atomics, Personal template), `Ramp`, `CoughMute` (push-to-mute / push-to-talk /
+  toggle with auto-repeat and focus-loss safety).
+- Engine: routing runs on every tick; each channel's HP bus feeds its headphone endpoint;
+  `EngineGraph::busOutputs` for monitor and stream outputs; per-bus peak meters, solo/PFL flags.
+
+**Verified**
+- 56 tests: ROUTING.md invariants 1–5 (exact gains, talkback lock, solo/PFL bit-exact isolation of
+  Main/Clean/HP, mute vs record tap, ramp slope), pan law, HP modes, monitor section, talkback dim,
+  cough state machine, zero RT allocations; the 10-minute harness run passes through routing.

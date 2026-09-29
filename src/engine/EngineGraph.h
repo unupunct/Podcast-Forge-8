@@ -10,6 +10,7 @@
 
 #include "engine/Bridges.h"
 #include "engine/StreamTypes.h"
+#include "routing/RoutingTypes.h"
 
 namespace pf8 {
 
@@ -21,6 +22,14 @@ struct ChannelRoute
     int outputPair = 0;
 };
 
+// A bus sent to an output bridge other than a channel's headphones (monitor speakers/headphones,
+// stream outputs for OBS/Discord such as Main, Clean Feed, Music).
+struct BusOutput
+{
+    int bridge = -1; // index into EngineGraph::outputs
+    int pair = 0;
+};
+
 struct EngineGraph
 {
     static constexpr int kMaxInputBridges = 16;
@@ -30,6 +39,8 @@ struct EngineGraph
     std::vector<std::shared_ptr<InputBridge>> inputs;
     std::vector<std::shared_ptr<OutputBridge>> outputs;
     std::array<ChannelRoute, kNumChannels> channels{};
+    // Extra bus outputs, indexed by BusId. HP buses normally go through ChannelRoute::outputBridge.
+    std::array<BusOutput, kBusCount> busOutputs{};
     uint64_t generation = 0;
 };
 

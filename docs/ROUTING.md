@@ -38,8 +38,13 @@ bus[b].L += Σ_s  g[s][b] · panL(s) · src[s]      (mono sources)
 bus[b].R += Σ_s  g[s][b] · panR(s) · src[s]
 ```
 
-Pan law: −3 dB constant power (`cos/sin` of `(p+1)·π/4`). Stereo sources (music, carts) use a balance
-law. The matrix mixes in a fixed order, so results are bit-reproducible, which the tests rely on.
+Pan law: −3 dB constant power (`cos/sin` of `(p+1)·π/4`), applied to a mono channel on **every**
+stereo bus it feeds (Main, Clean and the headphone mixes), so a centred mic at send gain 1.0 arrives
+at 0.707 per side everywhere. Stereo sources (music, carts) pass L/R directly. The matrix mixes in a
+fixed order, so results are bit-reproducible, which the tests rely on.
+
+Implementation: `src/routing/RoutingEngine.cpp` (pure DSP, no device or thread knowledge);
+parameters in `RoutingParams.h` as atomics written by the UI and ramped on the tick.
 
 Defaults for a new project:
 
@@ -62,9 +67,10 @@ Defaults for a new project:
 
 ## 4. Mute, solo, PFL, cough
 
-- **Mute**: channel gain → 0 on every bus (ramped). The record track is unaffected unless the "mute
-  affects isolated track" option is on (default off; a muted channel is still recorded, so a
-  mistaken mute doesn't lose audio). The cough mute has its own flag for this, also default off.
+- **Mute** (and a closed cough button): the channel is removed from **every** bus, including its
+  own headphone self-monitor (ramped 5 ms). The isolated record track is taken before routing and
+  is unaffected unless the "mute affects isolated track" recording option is on (default off: a
+  mistaken mute never loses audio).
 - **Solo** (solo-in-place on the Monitor bus only): when any channel is soloed, the Monitor bus
   (when monitoring Main) contains only the soloed channels. Main, headphones and recording are never
   affected.
@@ -78,7 +84,8 @@ Defaults for a new project:
 - Source: any assigned input (usually a producer mic) or channel N's mic.
 - Targets: any subset of HP1–HP8, or All. Target gain in the matrix is set only while the talkback
   key is held (or latched).
-- While talking back, the target headphones are optionally dimmed by −12 dB ("talkback dim").
+- While talking back, the rest of each target's headphone mix is dimmed by −12 dB ("talkback dim",
+  on by default); non-target headphones are untouched.
 - Main/Clean/Record gains are 0 and locked unless *Settings → Routing → Talkback to recording*
   is on.
 

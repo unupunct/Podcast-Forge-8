@@ -57,6 +57,9 @@ TEST_CASE("Harness: six independent clocks stay locked for 10 minutes without gl
     h.addOutput(output("hp2", 120.0, 480));
     h.addOutput(output("hp3", -90.0, 256, false, 1));
     for (int ch = 0; ch < 3; ++ch) h.route(ch, ch, -1, ch);
+    // Headphones are routed mixes now; make each one self-only so its output is a single tone.
+    for (int hp = 0; hp < 3; ++hp)
+        for (int ch = 0; ch < kRoutingChannels; ++ch) h.engine().routing().gain[static_cast<size_t>(ch)][hpBus(hp)].set(ch == hp ? 1.0f : 0.0f);
     h.commitGraph();
     h.captureFrom(540.0); // keep the last minute
     h.run(600.0);
@@ -98,7 +101,9 @@ TEST_CASE("Harness: six independent clocks stay locked for 10 minutes without gl
         const auto& y = h.outputCapture(o);
         REQUIRE(y.size() > 48000 * 50);
         INFO("output " << o);
-        CHECK(maxSecondDifference(y.data(), y.size()) < 1.2 * sineSecondDifference(0.25, freqs[o], 48000));
+        const double amplitude = 0.25 * 0.70710678; // centre pan law
+        CHECK(maxSecondDifference(y.data(), y.size()) < 1.2 * sineSecondDifference(amplitude, freqs[o], 48000));
+        CHECK(rms(y.data(), y.size()) > 0.9 * amplitude / std::sqrt(2.0));
     }
     CHECK(h.realtimeAllocations() == 0);
 }

@@ -16,6 +16,7 @@
 #include "engine/EngineGraph.h"
 #include "engine/InternalClock.h"
 #include "engine/StreamTypes.h"
+#include "routing/RoutingEngine.h"
 
 namespace pf8 {
 
@@ -28,6 +29,8 @@ struct EngineMeters
     uint64_t ticks = 0;
     uint64_t skippedTicks = 0;               // concurrent tick attempts rejected by the guard
     uint64_t graphGeneration = 0;
+    std::array<std::array<float, 2>, kBusCount> busPeak{}; // per bus, L/R block peak
+    bool anySolo = false, anyPfl = false;
 };
 
 // Receives each block's channel buffers (post-input, pre-processing) on the tick thread.
@@ -67,6 +70,9 @@ public:
     EngineMeters meters() const noexcept { return meterSnapshot_.read(); }
     void setTap(EngineTap* tap) noexcept { tap_.store(tap, std::memory_order_release); }
 
+    // Routing parameters (UI/control threads write, the tick reads).
+    RoutingParams& routing() noexcept { return routing_.params(); }
+
     void tick(int numFrames) noexcept override;
 
 private:
@@ -97,6 +103,10 @@ private:
     int64_t peakWindowFrames_ = 0;
     std::atomic<uint64_t> skipped_{0};
     std::atomic<EngineTap*> tap_{nullptr};
+    RoutingEngine routing_;
+    std::vector<float> busBuffers_; // [bus][L/R][kMaxBlock]
+    RoutingInputs routingIn_{};
+    RoutingOutputs routingOut_{};
     std::array<const float*, kNumChannels> channelPtrs_{};
 };
 

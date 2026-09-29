@@ -23,6 +23,15 @@ AudioEngine::AudioEngine(int sampleRate, int blockFrames)
             bridgePtrs_[b * EngineGraph::kMaxDeviceChannels + c] = bridgeBuffers_.data() + b * kBridgeStride + c * kMaxBlock;
     channelBuffers_.assign(static_cast<size_t>(kNumChannels) * kMaxBlock, 0.0f);
     for (size_t c = 0; c < kNumChannels; ++c) channelPtrs_[c] = channelBuffers_.data() + c * kMaxBlock;
+
+    routing_.prepare(sampleRate_, kMaxBlock);
+    busBuffers_.assign(static_cast<size_t>(kBusCount) * 2 * kMaxBlock, 0.0f);
+    for (size_t b = 0; b < kBusCount; ++b)
+    {
+        routingOut_.left[b] = busBuffers_.data() + (2 * b) * kMaxBlock;
+        routingOut_.right[b] = busBuffers_.data() + (2 * b + 1) * kMaxBlock;
+    }
+    for (size_t c = 0; c < kNumChannels; ++c) routingIn_.channel[c] = channelPtrs_[c];
 }
 
 AudioEngine::~AudioEngine() { stopInternalClock(); }
@@ -174,8 +183,24 @@ void AudioEngine::processBlock(int frames, int64_t nowNs) noexcept
 
     if (EngineTap* tap = tap_.load(std::memory_order_acquire)) tap->onChannelBlock(channelPtrs_.data(), kNumChannels, frames);
 
-    // 3. Headphone outputs. Stage 2 placeholder until the routing matrix (Stage 3):
-    //    each channel's headphones monitor that channel's own microphone.
+    // 3. Routing: channels (post-DSP from Stage 5) → Main, Clean, Music, HP 1–8, PFL, Monitor.
+    routing_.process(routingIn_, routingOut_, frames);
+    for (size_t b = 0; b < kBusCount; ++b)
+    {
+        float pl = 0.0f, pr = 0.0f;
+        const float* l = routingOut_.left[b];
+        const float* r = routingOut_.right[b];
+        for (int i = 0; i < frames; ++i)
+        {
+            pl = std::max(pl, std::abs(l[i]));
+            pr = std::max(pr, std::abs(r[i]));
+        }
+        meters_.busPeak[b] = {pl, pr};
+    }
+    meters_.anySolo = routing_.anySolo();
+    meters_.anyPfl = routing_.anyPfl();
+
+    // 4. Outputs: each channel's headphone bus to its headphone endpoint, extra bus outputs.
     if (!g) return;
     const size_t nOut = std::min(g->outputs.size(), static_cast<size_t>(EngineGraph::kMaxOutputBridges));
     for (int ch = 0; ch < kNumChannels; ++ch)
@@ -184,9 +209,16 @@ void AudioEngine::processBlock(int frames, int64_t nowNs) noexcept
         if (r.outputBridge < 0 || static_cast<size_t>(r.outputBridge) >= nOut) continue;
         if (OutputBridge* out = g->outputs[static_cast<size_t>(r.outputBridge)].get())
         {
-            const float* src = channelBuffers_.data() + static_cast<size_t>(ch) * kMaxBlock;
-            out->engineWritePair(r.outputPair, src, src, frames);
+            const auto bus = static_cast<size_t>(hpBus(ch));
+            out->engineWritePair(r.outputPair, routingOut_.left[bus], routingOut_.right[bus], frames);
         }
+    }
+    for (size_t b = 0; b < kBusCount; ++b)
+    {
+        const BusOutput& bo = g->busOutputs[b];
+        if (bo.bridge < 0 || static_cast<size_t>(bo.bridge) >= nOut) continue;
+        if (OutputBridge* out = g->outputs[static_cast<size_t>(bo.bridge)].get())
+            out->engineWritePair(bo.pair, routingOut_.left[b], routingOut_.right[b], frames);
     }
     for (size_t b = 0; b < nOut; ++b)
         if (OutputBridge* out = g->outputs[b].get()) out->engineCommit(frames, nowNs);
