@@ -26,7 +26,7 @@ if ($Live) {
 }
 
 if ($VerifyUi) {
-    $exe = Get-ChildItem 'build\release\src\app' -Recurse -Filter 'PodcastForge8.exe' | Select-Object -First 1
+    $exe = Get-Item 'build\release\bin\PodcastForge8.exe'
     $p = Start-Process $exe.FullName -ArgumentList '--verify-ui' -Wait -PassThru -NoNewWindow
     if ($p.ExitCode -ne 0) { Write-Output "GATE: verify-ui FAILED ($($p.ExitCode))"; exit 1 }
     Write-Output 'verify-ui passed'

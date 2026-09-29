@@ -253,3 +253,22 @@ std::vector<EndpointRaw> enumerateEndpoints(bool probeExclusiveRates)
 }
 
 } // namespace pf8
+
+namespace pf8 {
+
+std::optional<std::string> defaultEndpointId(Flow flow)
+{
+    ComPtr<IMMDeviceEnumerator> enumerator;
+    if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, IID_PPV_ARGS(&enumerator))))
+        return std::nullopt;
+    ComPtr<IMMDevice> device;
+    if (FAILED(enumerator->GetDefaultAudioEndpoint(flow == Flow::Capture ? eCapture : eRender, eConsole, &device)))
+        return std::nullopt;
+    LPWSTR id = nullptr;
+    if (FAILED(device->GetId(&id)) || !id) return std::nullopt;
+    std::string s = narrow(id);
+    CoTaskMemFree(id);
+    return s;
+}
+
+} // namespace pf8
