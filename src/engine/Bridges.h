@@ -50,6 +50,8 @@ struct BridgeStats
     double fill = 0.0;   // averaged, device frames
     double target = 0.0; // device frames
     SyncStatus status = SyncStatus::Offline;
+    double timestampAgeMs = 0.0; // input: engine time minus the end of the last packet (hardware time)
+    uint64_t deviceFrames = 0;   // frames delivered by (input) / taken by (output) the device
 };
 
 // Target ring fill in device frames: covers one device period plus bursts of engine blocks,
@@ -64,6 +66,8 @@ protected:
     std::atomic<uint64_t> underruns_{0}, overruns_{0}, dropped_{0};
     std::atomic<double> ppm_{0.0}, fill_{0.0};
     std::atomic<SyncStatus> status_{SyncStatus::Priming};
+    std::atomic<double> tsAgeMs_{0.0};
+    std::atomic<uint64_t> deviceFrames_{0};
     double target_ = 0.0;
 };
 

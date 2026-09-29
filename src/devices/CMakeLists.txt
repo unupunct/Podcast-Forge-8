@@ -5,5 +5,5 @@ add_library(pf8_devices STATIC
     HotplugWatcher.cpp
     WinEndpointEnumerator.cpp
 )
-target_link_libraries(pf8_devices PUBLIC pf8_core PRIVATE setupapi ole32 propsys)
+target_link_libraries(pf8_devices PUBLIC pf8_core PRIVATE setupapi cfgmgr32 ole32 propsys)
 pf8_set_warnings(pf8_devices)

@@ -78,6 +78,22 @@ std::optional<UsbId> parseUsbInterfacePath(std::string_view path)
     return id;
 }
 
+std::optional<UsbId> parseUsbInstanceId(std::string_view id)
+{
+    const std::string p = lower(id);
+    if (p.rfind("usb\\vid_", 0) != 0 || p.size() < 21 || p.compare(12, 5, "&pid_") != 0) return std::nullopt;
+    auto vid = hex16(std::string_view(p).substr(8, 4));
+    auto pid = hex16(std::string_view(p).substr(17, 4));
+    if (!vid || !pid) return std::nullopt;
+    UsbId u;
+    u.vid = *vid;
+    u.pid = *pid;
+    const size_t slash = p.find('\\', 21);
+    if (slash != std::string::npos) u.instance = std::string(id.substr(slash + 1));
+    u.hasSerial = !u.instance.empty() && u.instance.find('&') == std::string::npos;
+    return u;
+}
+
 std::string DeviceInfo::displayName() const
 {
     std::string name = raw.friendlyName.empty() ? raw.deviceDesc : raw.friendlyName;
@@ -103,6 +119,15 @@ std::vector<DeviceInfo> classify(const std::vector<EndpointRaw>& endpoints)
         DeviceInfo d;
         d.raw = e;
         d.usb = parseUsbInterfacePath(e.parentInterfacePath);
+        // Composite devices (webcam mics, headsets with HID): the serial lives on the parent USB
+        // device node, not on the audio interface.
+        if (d.usb && !d.usb->hasSerial)
+            if (auto parent = parseUsbInstanceId(e.usbDeviceInstanceId))
+                if (parent->vid == d.usb->vid && parent->pid == d.usb->pid && parent->hasSerial)
+                {
+                    d.usb->instance = parent->instance;
+                    d.usb->hasSerial = true;
+                }
         if (!e.containerId.empty())
         {
             const auto& f = flows[lower(e.containerId)];

@@ -33,3 +33,34 @@
 **Known gaps carried into Stage 2**
 - For composite USB devices (e.g. a webcam's mic) the serial lives on the parent USB device;
   the enumerator currently reads only the audio interface's instance id → `hasSerial=false`.
+
+## Stage 2 — 8 mic channels, 8 headphone outputs, drift bridges, hot-plug (2026-09-29)
+
+**Added**
+- `VarResampler` (48-tap polyphase windowed sinc, slew-limited variable ratio, master passthrough).
+- `DriftController` (PI, three-stage fill filter, Locked/Converging/Unstable).
+- `InputBridge` / `OutputBridge` with hardware-timestamp fill linearisation, burst-aware targets,
+  measured-fill priming with one-time re-centring, 5 ms fades, counters.
+- `AudioEngine` rebuilt device-agnostic around an `EngineGraph` published through a lock-free
+  queue (retired graphs freed on the control thread), tick guard, `EngineTap`, per-channel meters.
+  Headphones temporarily monitor their own channel until the Stage 3 matrix.
+- `EngineController` reconcile loop: registry + assignments → resolution → open/close only the
+  affected streams → master selection → graph. Hot-plug via `HotplugWatcher` (300 ms debounce).
+- `DeviceIdentity`, resolution rules (exact / serial fingerprint / possible match / none),
+  `Assignments` JSON, parent-USB serial for composite devices, `SettingsDb` (SQLite),
+  `core/Json`, `core/Clock`.
+- UI: Channels page (name, mic + input channel, headphones, status, sync, level meter, one-click
+  confirm for possible matches); top bar shows master, mode, streams and device health.
+- `tests/harness`: `EngineHarness` with fake devices (ppm, period, jitter), click detector.
+
+**Verified**
+- 43 tests + 2 live tests. Harness: 10-minute six-clock lock (estimates within 0.06 ppm, no
+  underruns/glitches, zero RT allocations), inter-device alignment ≤ 0.15 samples, bit-exact
+  hot-plug isolation. Live: BRIO + VB-Cable loop Locked in 15 s with zero underruns.
+
+**Found and fixed during the stage**
+- Aliasing of the packet/block beat into the drift loop (±90 ppm error) → fill linearisation.
+- Callback jitter in the measurement (±2.5 samples alignment wander) → hardware timestamps.
+- Master burst not covered by bridge targets (underruns at 128-frame devices) → `engineBurst`.
+- Bridges starting hundreds of frames high after late graph join → measured-fill priming.
+- Resampler read before its buffer when leaving passthrough → passthrough is master-only.

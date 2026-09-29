@@ -21,6 +21,14 @@ TEST_CASE("parseUsbInterfacePath extracts vid, pid and instance", "[devices]")
     CHECK(serial->instance == "A1B2C3D4E5");
     CHECK(serial->hasSerial);
 
+    auto inst = parseUsbInstanceId(R"(USB\VID_046D&PID_085E\7A1B2C3D)");
+    REQUIRE(inst.has_value());
+    CHECK(inst->vid == 0x046D);
+    CHECK(inst->instance == "7A1B2C3D");
+    CHECK(inst->hasSerial);
+    CHECK_FALSE(parseUsbInstanceId(R"(USB\VID_046D&PID_085E\5&1c2b&0&3)")->hasSerial);
+    CHECK_FALSE(parseUsbInstanceId(R"(HDAUDIO\FUNC_01&VEN_10EC)").has_value());
+
     CHECK_FALSE(parseUsbInterfacePath(R"(\\?\hdaudio#func_01&ven_10ec&dev_0256#4&1a2b&0&0001#{guid})").has_value());
     CHECK_FALSE(parseUsbInterfacePath("").has_value());
 }

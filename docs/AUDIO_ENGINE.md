@@ -16,63 +16,94 @@
 
 ## 3. Components
 
-### DeviceStream
-Wraps one `WasapiStream` (own event-driven IAudioClient, opened by endpoint ID; shared, low-latency shared via IAudioClient3, or exclusive) — or, in ASIO builds, a JUCE ASIO `AudioIODevice` — for one endpoint.
-Direction: input, output, or both (headsets). Owns:
+As built in Stage 2. Source: `src/engine/`.
 
-- `SpscRing<float>` per direction, sized `8 × max(deviceBlock, engineBlock) × channels`.
-- `VarResampler` per direction (engine rate ↔ device rate × drift ratio).
-- `DriftController`.
-- Counters (atomics): xruns, underruns, overruns, dropped samples, callback period jitter.
+### WasapiStream
+One event-driven WASAPI stream (capture or render) opened **by endpoint ID** (never by name or
+enumeration order). Shared, low-latency shared (`IAudioClient3`), or exclusive; float32 / int32 /
+int24 / int16 device formats converted to float on the stream's MMCSS "Pro Audio" thread (FTZ/DAZ
+set). Capture callbacks carry the hardware QPC time of each packet's first frame; render callbacks
+carry the `IAudioClock` playback position and its QPC time. In ASIO builds a JUCE ASIO
+`AudioIODevice` takes this role.
 
-The device callback only copies interleaved/non-interleaved samples to or from its ring.
-For the **master** device the callback additionally invokes `AudioEngine::tick()` after pushing its
-own input and before pulling its own output. This gives the master zero added latency.
+### Bridges (`Bridges.h`)
+Each open endpoint has one bridge between its clock and the engine clock:
 
-### MasterClock
-Selects the device whose callback drives the tick:
+- `InputBridge` (device → engine) and `OutputBridge` (engine → device), each an SPSC ring of
+  interleaved device frames + a `VarResampler` + a `DriftController`.
+- **Device side** is called from the stream thread (or the test harness); **engine side** from the
+  tick. They share only the ring and atomics.
+- A multi-channel input bridge carries every device channel; a channel picks one input or the
+  average of all. An output bridge carries one or more stereo pairs; mono devices get (L+R)/2.
+- Counters (atomics): underruns, overruns, dropped frames, ppm, averaged fill, status.
 
-1. The user's explicit choice (Settings → Audio → Master clock), else
-2. The first assigned headphone output that is online, else
-3. The first online input, else
-4. `InternalClock`: an MMCSS thread waiting on a high-resolution waitable timer
-   (`CREATE_WAITABLE_TIMER_HIGH_RESOLUTION`), ticking every engine block.
+**Fill measurement.** The quantity regulated is the *linearised* fill, not the raw ring count:
 
-On master loss the control thread switches to the next candidate. The switch is posted as a command
-and takes effect at a block boundary; the ex-master's rings are flushed, and all drift controllers are
-reset to their current ratio (not to 1.0) so there's no pitch jump.
+- input: `ring + deviceRate × (now − end of the last packet, in hardware time)`;
+- output: `framesWritten − (framesTakenAtLastPacket + deviceRate × (now − that packet's hardware start))`.
+
+Using hardware timestamps (not callback times) keeps both the device's packet staircase and
+scheduler jitter out of the loop. Sampling the raw ring at engine ticks aliases the packet/block
+beat into a slow false oscillation (≈ 13 s period at 200 ppm) that a PI loop would chase —
+measured during development as ±90 ppm estimate error, gone with linearisation.
+
+**Target fill** (device frames):
+`(3·max(P, B) + min(P, B)) / 2 + 2 ms` where P = device period and B = the engine *burst*
+(below), plus half a period on inputs (live shared-mode captures deliver a packet up to one period
+after its last frame) and the device's own buffering on outputs.
+
+**Priming and re-centring.** A bridge outputs silence until the linearised fill reaches the
+target, then discards any excess once so it starts exactly centred, and fades in over 5 ms.
+Without this, a device that started before its bridge joined the graph began hundreds of frames
+high, which at the ±1000 ppm clamp takes > 10 s to drain (found in the live VB-Cable test).
+Underrun → silence, re-prime, fade in; overrun beyond 4× target → drop to target.
+
+### Master clock and the pull model
+The master device's own bridge runs at the fixed nominal ratio (an exact zero-latency passthrough
+when rates match). A **render master** asks its bridge for `n` device frames; the bridge calls
+`tick(engineBlock)` until it holds `n`, so the engine runs in *bursts* of
+`ceil(masterPeriod / engineBlock)` blocks per master callback and the master path adds at most one
+engine block of latency. A **capture master** ticks whenever a whole block is available. Non-master
+bridges size their targets for that burst.
+
+Selection (`MasterClock.h`): user-preferred online endpoint → first online channel headphone
+output → first online render → first online input → `InternalClock` (MMCSS thread on a
+high-resolution waitable timer, absolute QPC scheduling).
+
+`tick()` is guarded by an atomic try-flag: during a master hand-off a second caller skips instead
+of re-entering. Changing the master reopens only the old and new master streams (their bridges are
+rebuilt with the new role); other devices keep running.
 
 ### VarResampler
-Windowed-sinc polyphase resampler (32 taps, 256 phases, Kaiser β≈8.6, linear interpolation between
-phases). The ratio can change every block. The ratio is smoothed (one-pole, τ≈2 s), so the pitch
-change from a correction is inaudible (max slew ~2 ppm/s). Passband flat to 20 kHz at 48 kHz.
-Latency: 16 samples. All state is pre-allocated.
+Polyphase windowed sinc: 48 taps, 256 phases with linear interpolation between phase rows,
+Kaiser β = 8, cutoff 0.93 × min(1, 1/ratio) of the input Nyquist (flat to ≈ 19.8 kHz at 48 kHz,
+≈ 80 dB stopband). Each phase row normalised to unity DC gain. The ratio correction is slew-limited
+to 0.02 ppm per output frame (≈ 1000 ppm/s), so a correction is a glide, never a step. Latency
+24 input frames (0 in master passthrough). All state pre-allocated.
 
 ### DriftController
-Per non-master stream. Error signal = (ring fill − target fill) in samples, averaged over ~0.5 s,
-cross-checked against device and engine positions from QPC-stamped callbacks (`IAudioClock`
-position where available). PI loop:
-
-```
-ratio = nominal × (1 + Kp·e + Ki·∫e)   clamped to ±1000 ppm
-```
-
-Kp and Ki are tuned so a 200 ppm step settles within 30 s with no overshoot beyond ±0.25 blocks.
-Status reported:
+Per non-master bridge. The linearised fill passes three cascaded one-pole filters (τ = 0.2 s each);
+error e = filtered fill − target. PI: `c = Kp·e + Ki·∫e dt` with `Kp = 2ζωn/R`, `Ki = ωn²/R`,
+ωn = 0.2 rad/s, ζ = 1 (R = device rate); clamped to ±1000 ppm with anti-windup.
 
 | Status | Condition |
 |---|---|
-| `Locked` | \|e\| < 0.5 block for 10 s |
-| `Converging` | otherwise, within limits |
-| `Unstable` | clamp hit, or estimated drift variance > threshold, or ≥3 xruns/min |
-| `Offline` | device not running |
+| `Priming` | waiting for the target fill |
+| `Converging` | running, not yet within tolerance for 10 s |
+| `Locked` | \|e\| < 0.5 engine block for 10 s (hysteresis: leaves only beyond 4×) |
+| `Unstable` | clamp hit for > 2 s |
+| `Native` | master bridge (no resampling correction) |
 
-The UI shows each device's ppm, fill, status, and whether resampling is active (always active for a
-non-master; for the master, "native").
-
-### Ring target fill
-`target = 1.5 × max(deviceBlock, engineBlock)`. Underrun (ring empty on pull) → output zeros, a short
-fade-in on recovery, increment `underruns`, log event. Overrun → drop oldest, fade, increment `overruns`.
+### Verified (Stage 2)
+- Harness, 10 simulated minutes, three inputs at +200 / −150 / +80 ppm (periods 480 / 441 / 128)
+  and outputs at +120 / −90 ppm, 500 µs callback jitter: estimates within 0.06 ppm, all Locked,
+  zero underruns/overruns, no discontinuities, zero allocations on the audio path.
+- Channels on three different devices (+180 / −200 / +60 ppm): arrival-time difference varies
+  by ≤ 0.15 samples over 150 s after lock; click spacing exactly 48000.00 samples.
+- Hot-plug: unplugging and replugging one mic leaves every other channel **bit-identical** to an
+  undisturbed run.
+- Live: Logitech BRIO mic + VB-Cable capture bridged to a VB-Cable render master, WASAPI shared:
+  Locked within 15 s, zero underruns.
 
 ## 4. The tick
 
@@ -96,20 +127,20 @@ tick(nFrames):
 
 Every buffer is allocated at engine start for the maximum block size (512) × max sources/buses.
 
-## 5. Latency budget (128 samples at 48 kHz, WASAPI exclusive)
+## 5. Latency (measured targets, 48 kHz)
 
-| Stage | Samples | ms |
+Per non-master bridge, from `bridgeTargetFill`:
+
+| Configuration | Input bridge | Output bridge |
 |---|---|---|
-| Input device buffer | 128 | 2.67 |
-| Input ring target (non-master) | 192 | 4.0 |
-| Resampler | 16 | 0.33 |
-| Engine block | 128 | 2.67 |
-| Output ring target (non-master) | 192 | 4.0 |
-| Output device buffer | 128 | 2.67 |
-| **Total, mic → headphone on two non-master devices** | | **≈16 ms** |
-| Mic → headphone on the master device (headset) | | ≈8 ms |
+| Exclusive, 128-frame device periods, 128-frame master | ≈ 8.7 ms | ≈ 7.3 ms + device buffer |
+| Shared mode, 10 ms device periods (480), 10 ms master | ≈ 28 ms | ≈ 23 ms + device buffer |
 
-Shared mode adds the WASAPI engine period (typically 10 ms, 3 ms with `IAudioClient3`).
+Plus resampler 0.5 ms and the device's own WASAPI buffering. The master path adds ≤ 1 engine block.
+Mic → headphones across two non-master devices is therefore roughly 15–20 ms with small
+exclusive-mode buffers but ≈ 65–70 ms with default 10 ms shared-mode devices — too much for
+comfortable self-monitoring, which is why exclusive mode (or a headset as master) is recommended. The UI shows each device's period, mode and fill.
+Lowest latency: exclusive mode, and use a headset's own output as the master.
 
 ## 6. Failure handling
 
@@ -118,7 +149,7 @@ Shared mode adds the WASAPI engine period (typically 10 ms, 3 ms with `IAudioCli
 | Endpoint removed | `HotplugWatcher` → control thread closes only that `DeviceStream`; source outputs silence; channel shows DISCONNECTED; nothing reassigned |
 | Endpoint returns | Identity matched → stream reopened on the control thread → posted to engine → drift controller starts `Converging` |
 | Device rate changes | Stream reopened at the new rate; resampler nominal ratio updated; warning shown; other streams untouched |
-| Master lost | See MasterClock |
+| Master lost | Next candidate becomes master (only the old/new master streams reopen); internal clock if none |
 | Tick stall > 500 ms (watchdog) | Save project + snapshot; stop streams; recorder finalises headers of open files (they stay valid); rebuild engine; resume; write a diagnostics report |
 | xrun/glitch | Counter incremented; event (device, time, fill, ratio, load) queued for Diagnostics |
 

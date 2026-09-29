@@ -35,6 +35,8 @@ BridgeStats BridgeCounters::read() const noexcept
     s.fill = fill_.load(std::memory_order_relaxed);
     s.target = target_;
     s.status = status_.load(std::memory_order_relaxed);
+    s.timestampAgeMs = tsAgeMs_.load(std::memory_order_relaxed);
+    s.deviceFrames = deviceFrames_.load(std::memory_order_relaxed);
     return s;
 }
 
@@ -47,7 +49,9 @@ InputBridge::InputBridge(const BridgeConfig& config)
             static_cast<size_t>(config.deviceChannels))
 {
     const int ch = cfg_.deviceChannels;
-    target_ = bridgeTargetFill(cfg_);
+    // Live shared-mode capture delivers each packet up to one period after its last frame was
+    // captured; the linearised measure counts that, so the ring itself runs up to a period lower.
+    target_ = bridgeTargetFill(cfg_) + (cfg_.master ? 0 : cfg_.devicePeriod / 2);
     rs_.prepare(ch, static_cast<double>(cfg_.deviceRate) / cfg_.engineRate, kMaxBlock, cfg_.master);
     dc_.prepare(cfg_.deviceRate, target_, 0.5 * deviceFramesFor(cfg_.engineBlock, cfg_));
     const int maxIn = static_cast<int>(std::ceil(kMaxBlock * static_cast<double>(cfg_.deviceRate) / cfg_.engineRate * 1.01)) +
@@ -68,6 +72,7 @@ void InputBridge::deviceWrite(const float* interleaved, int frames, int64_t firs
         dropped_.fetch_add((samples - written) / static_cast<size_t>(cfg_.deviceChannels), std::memory_order_relaxed);
     }
     lastEndNs_.store(firstFrameNs + static_cast<int64_t>(1e9 * frames / cfg_.deviceRate), std::memory_order_release);
+    deviceFrames_.fetch_add(static_cast<uint64_t>(frames), std::memory_order_relaxed);
 }
 
 void InputBridge::driveEngine(TickClient& engine) noexcept
@@ -90,12 +95,41 @@ void InputBridge::outputSilence(float* const* perChannel, int frames) noexcept
 void InputBridge::engineRead(float* const* perChannel, int frames, int64_t nowNs) noexcept
 {
     const int ch = cfg_.deviceChannels;
-    const double ringFrames = static_cast<double>(readableDeviceFrames());
+    double ringFrames = static_cast<double>(readableDeviceFrames());
+
+    // Linearised fill: frames the device has captured since the end of its last delivered packet
+    // (hardware time) count as present, so neither packet size nor callback jitter aliases in.
+    // Priming, re-centring and the drift loop all use this same measure.
+    auto measure = [&] {
+        double m = static_cast<double>(readableDeviceFrames());
+        const int64_t lastEnd = lastEndNs_.load(std::memory_order_acquire);
+        if (lastEnd > 0)
+        {
+            tsAgeMs_.store(static_cast<double>(nowNs - lastEnd) * 1e-6, std::memory_order_relaxed);
+            const double maxSpan = 4.0 * cfg_.devicePeriod / cfg_.deviceRate;
+            m += std::clamp(static_cast<double>(nowNs - lastEnd) * 1e-9, -maxSpan, maxSpan) * cfg_.deviceRate;
+        }
+        return m;
+    };
 
     if (!running_)
     {
-        if (ringFrames >= target_ && ringFrames > 0)
+        const double measured = measure();
+        const int need = rs_.inputFramesNeeded(frames);
+        if (ringFrames > 0 && measured >= target_ && ringFrames >= need)
         {
+            // Start centred on the target: a device that ran before its bridge joined the graph
+            // (or during re-priming) would otherwise begin with excess latency that the drift loop
+            // could only remove slowly. Safe to drop: the output fades in from zero.
+            if (!cfg_.master)
+            {
+                const double excess = std::min(measured - target_, ringFrames - need);
+                if (excess > cfg_.devicePeriod / 4.0)
+                {
+                    ring_.discard(static_cast<size_t>(excess) * static_cast<size_t>(ch));
+                    ringFrames -= std::floor(excess);
+                }
+            }
             running_ = true;
             rs_.reset();
             fadeRemaining_ = fadeLength_;
@@ -130,17 +164,7 @@ void InputBridge::engineRead(float* const* perChannel, int frames, int64_t nowNs
         outputSilence(perChannel, frames);
         return;
     }
-
-    // Linearised fill: frames the device has captured since the end of its last delivered packet
-    // (hardware time) count as present, so neither packet size nor callback jitter aliases in.
-    double measured = static_cast<double>(avail);
-    const int64_t lastEnd = lastEndNs_.load(std::memory_order_acquire);
-    if (lastEnd > 0)
-    {
-        const double maxSpan = 4.0 * cfg_.devicePeriod / cfg_.deviceRate;
-        const double elapsed = std::clamp(static_cast<double>(nowNs - lastEnd) * 1e-9, -maxSpan, maxSpan);
-        measured += elapsed * cfg_.deviceRate;
-    }
+    const double measured = measure();
 
     int remaining = need;
     while (remaining > 0)
@@ -280,8 +304,24 @@ void OutputBridge::deviceRead(float* interleaved, int frames, int64_t nowNs, Tic
 
     if (devicePriming_.load(std::memory_order_relaxed))
     {
-        if (static_cast<double>(readableDeviceFrames()) >= target_ && readableDeviceFrames() > 0)
+        // Same measure the engine side regulates: ring plus what the device still holds ahead of
+        // playback (packetStart lies in the future by the device's own buffering).
+        const double avail = static_cast<double>(readableDeviceFrames());
+        const double ahead = packetStartNs != 0 ? static_cast<double>(packetStartNs - nowNs) * 1e-9 * cfg_.deviceRate : 0.0;
+        const double measured = avail + std::max(0.0, ahead);
+        if (avail >= frames && measured >= target_)
         {
+            // Start centred on the target (see InputBridge): drop excess queued while priming.
+            if (!cfg_.master)
+            {
+                const double excess = std::min(measured - target_, avail - frames);
+                if (excess > cfg_.devicePeriod / 4.0)
+                {
+                    const size_t n = static_cast<size_t>(excess);
+                    ring_.discard(n * static_cast<size_t>(devCh));
+                    totalRead_ += n;
+                }
+            }
             devicePriming_.store(false, std::memory_order_release);
             fadeRemaining_ = fadeLength_;
         }

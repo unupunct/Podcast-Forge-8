@@ -9,6 +9,7 @@
 #include <mmreg.h>
 #include <propvarutil.h>
 #include <setupapi.h>
+#include <cfgmgr32.h>
 #include <wrl/client.h>
 
 #include <string>
@@ -109,16 +110,17 @@ std::string parentInterfacePath(IMMDevice* device)
     return p == std::string::npos ? s : s.substr(p);
 }
 
-std::string manufacturerFromInterface(const std::string& path)
+// Manufacturer of the device owning `path`, and the nearest USB device node above it (walking
+// past composite-interface nodes "USB\VID_..&PID_..&MI_nn\..").
+void interfaceDetails(const std::string& path, std::string& manufacturer, std::string& usbInstanceId)
 {
-    if (path.empty()) return {};
+    if (path.empty()) return;
     const int n = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
     std::wstring w(static_cast<size_t>(n), L'\0');
     MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, w.data(), n);
 
     HDEVINFO set = SetupDiCreateDeviceInfoList(nullptr, nullptr);
-    if (set == INVALID_HANDLE_VALUE) return {};
-    std::string result;
+    if (set == INVALID_HANDLE_VALUE) return;
     SP_DEVICE_INTERFACE_DATA ifData{sizeof(ifData)};
     if (SetupDiOpenDeviceInterfaceW(set, w.c_str(), 0, &ifData))
     {
@@ -126,12 +128,30 @@ std::string manufacturerFromInterface(const std::string& path)
         DWORD needed = 0;
         SetupDiGetDeviceInterfaceDetailW(set, &ifData, nullptr, 0, &needed, &devData);
         wchar_t buf[256]{};
-        if (SetupDiGetDeviceRegistryPropertyW(set, &devData, SPDRP_MFG, nullptr, reinterpret_cast<BYTE*>(buf),
+        if (manufacturer.empty() &&
+            SetupDiGetDeviceRegistryPropertyW(set, &devData, SPDRP_MFG, nullptr, reinterpret_cast<BYTE*>(buf),
                                               sizeof(buf) - sizeof(wchar_t), nullptr))
-            result = narrow(buf);
+            manufacturer = narrow(buf);
+
+        DEVINST node = devData.DevInst;
+        for (int depth = 0; depth < 6 && node != 0; ++depth)
+        {
+            wchar_t id[MAX_DEVICE_ID_LEN]{};
+            if (CM_Get_Device_IDW(node, id, MAX_DEVICE_ID_LEN, 0) != CR_SUCCESS) break;
+            std::string s = narrow(id);
+            std::string upper = s;
+            for (auto& ch : upper) ch = static_cast<char>(toupper(static_cast<unsigned char>(ch)));
+            if (upper.rfind("USB\\VID_", 0) == 0 && upper.find("&MI_") == std::string::npos)
+            {
+                usbInstanceId = s;
+                break;
+            }
+            DEVINST parent = 0;
+            if (CM_Get_Parent(&parent, node, 0) != CR_SUCCESS) break;
+            node = parent;
+        }
     }
     SetupDiDestroyDeviceInfoList(set);
-    return result;
 }
 
 void readDeviceFormat(IPropertyStore* store, EndpointRaw& e)
@@ -244,7 +264,7 @@ std::vector<EndpointRaw> enumerateEndpoints(bool probeExclusiveRates)
         if (e.state == DeviceState::Active)
         {
             e.parentInterfacePath = parentInterfacePath(device.Get());
-            if (e.manufacturer.empty()) e.manufacturer = manufacturerFromInterface(e.parentInterfacePath);
+            interfaceDetails(e.parentInterfacePath, e.manufacturer, e.usbDeviceInstanceId);
             if (probeExclusiveRates) probe(device.Get(), e);
         }
         out.push_back(std::move(e));

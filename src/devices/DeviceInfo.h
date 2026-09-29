@@ -30,6 +30,8 @@ struct UsbId
 
 // Parses "\\?\usb#vid_046d&pid_0a38&mi_00#7&2a1b3c&0&0000#{guid}" (case-insensitive).
 std::optional<UsbId> parseUsbInterfacePath(std::string_view path);
+// Parses a device instance id "USB\VID_046D&PID_085E\<instance>" (case-insensitive).
+std::optional<UsbId> parseUsbInstanceId(std::string_view id);
 
 // Exactly what the OS enumerator reports for one endpoint.
 struct EndpointRaw
@@ -41,6 +43,7 @@ struct EndpointRaw
     std::string enumerator;          // "USB", "HDAUDIO", "ROOT", "SWD", "BTHENUM", ...
     std::string containerId;
     std::string parentInterfacePath; // from IDeviceTopology
+    std::string usbDeviceInstanceId; // nearest USB device node above the audio function, e.g. "USB\\VID_046D&PID_085E\\7A1B2C3D"
     Flow flow = Flow::Render;
     DeviceState state = DeviceState::NotPresent;
     FormFactor formFactor = FormFactor::Unknown;
