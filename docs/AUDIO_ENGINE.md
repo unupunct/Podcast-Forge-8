@@ -17,7 +17,7 @@
 ## 3. Components
 
 ### DeviceStream
-Wraps one JUCE `AudioIODevice` (WASAPI shared, WASAPI exclusive, or ASIO) for one endpoint.
+Wraps one `WasapiStream` (own event-driven IAudioClient, opened by endpoint ID; shared, low-latency shared via IAudioClient3, or exclusive) — or, in ASIO builds, a JUCE ASIO `AudioIODevice` — for one endpoint.
 Direction: input, output, or both (headsets). Owns:
 
 - `SpscRing<float>` per direction, sized `8 × max(deviceBlock, engineBlock) × channels`.

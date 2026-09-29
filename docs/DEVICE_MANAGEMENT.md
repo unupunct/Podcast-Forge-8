@@ -12,9 +12,12 @@
    `USB\VID_xxxx&PID_xxxx\serial`), manufacturer (`DEVPKEY_Device_Manufacturer`), bus type (USB,
    HDAudio, PCI, Bluetooth, virtual).
 
-JUCE's WASAPI type is used to *open* devices; it identifies them by name, so the registry maps
-endpoint ID → JUCE device name, and resolves duplicate names (Windows adds "2- " prefixes) by
-endpoint ID.
+Devices are opened by endpoint ID through Podcast Forge's own `WasapiStream` (`IMMDeviceEnumerator::GetDevice(endpointId)`).
+Friendly names are display-only; duplicate names (Windows adds "2- " prefixes, JUCE adds " (2)")
+never affect which device a channel opens. The parent USB device is found through
+`IDeviceTopology` → connector → connected part → `GetDeviceId`, whose interface path
+(`\\?\usb#vid_xxxx&pid_xxxx&mi_nn#<instance>#{guid}`) supplies VID, PID and the instance segment
+(a real serial when the device reports one, otherwise a port-derived id beginning with a digit and `&`).
 
 Supported sample rates are probed by `IAudioClient::IsFormatSupported` (exclusive) for 44.1, 48,
 88.2, 96 kHz; shared mode reports the mix format.
