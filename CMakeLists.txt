@@ -1,0 +1,41 @@
+cmake_minimum_required(VERSION 3.25)
+project(PodcastForge8 VERSION 0.1.0 LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+    message(FATAL_ERROR "Podcast Forge 8 targets Windows x64 only")
+endif()
+
+set(PF8_ASIO_SDK_DIR "" CACHE PATH "Path to a locally supplied Steinberg ASIO SDK (optional)")
+option(PF8_BUILD_TESTS "Build the test executable" ON)
+
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(PF8Warnings)
+
+add_subdirectory(third_party)
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/core/CMakeLists.txt)
+    add_subdirectory(src/core)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/devices/CMakeLists.txt)
+    add_subdirectory(src/devices)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/engine/CMakeLists.txt)
+    add_subdirectory(src/engine)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/CMakeLists.txt)
+    add_subdirectory(src/ui)
+endif()
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/app/CMakeLists.txt)
+    add_subdirectory(src/app)
+endif()
+
+if(PF8_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()

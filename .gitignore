@@ -8,4 +8,3 @@ tools/*
 *.obj
 .vs/
 CMakeUserPresets.json
-!tools/env.ps1
