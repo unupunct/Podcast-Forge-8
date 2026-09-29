@@ -7,6 +7,7 @@
 #include "app/CliModes.h"
 #include "core/Log.h"
 #include "core/Paths.h"
+#include "core/SettingsDb.h"
 #include "engine/EngineController.h"
 #include "ui/MainWindow.h"
 
@@ -32,9 +33,11 @@ public:
         log::start({paths::logs()});
         PF8_LOG_INFO("app", "app.start version=%s", JUCE_APPLICATION_VERSION_STRING);
 
-        controller_ = std::make_unique<EngineController>(EngineController::Settings{});
-        controller_->rescanDevices();
-        controller_->startEngineOnDefaultOutput();
+        std::string dbError;
+        if (!settings_.open(paths::settingsDb(), &dbError))
+            PF8_LOG_ERROR("app", "settings unavailable (%s); assignments will not persist", dbError.c_str());
+        controller_ = std::make_unique<EngineController>(EngineController::Settings{}, settings_.isOpen() ? &settings_ : nullptr);
+        controller_->start();
         window_ = std::make_unique<ui::MainWindow>(getApplicationName(), *controller_);
     }
 
@@ -42,6 +45,7 @@ public:
     {
         window_.reset();
         controller_.reset();
+        settings_.close();
         if (log::isRunning())
         {
             PF8_LOG_INFO("app", "app.exit clean");
@@ -57,6 +61,7 @@ public:
     }
 
 private:
+    SettingsDb settings_;
     std::unique_ptr<EngineController> controller_;
     std::unique_ptr<ui::MainWindow> window_;
 };

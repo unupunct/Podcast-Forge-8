@@ -1,77 +1,103 @@
 #pragma once
-// Owns the master clock source and runs the tick. Stage 1: the tick produces silence and measures
-// load; later stages add sources, DSP, routing, recording.
+// The engine tick. Device-agnostic: live WASAPI streams and the offline test harness drive it
+// through the same bridges.
+//
+// Threading: tick() runs on whichever thread drives the clock (master device, internal clock, or
+// harness). It is guarded so a second concurrent caller skips instead of re-entering. Everything
+// else is called from the control thread.
+#include <array>
 #include <atomic>
 #include <memory>
-#include <mutex>
-#include <optional>
-#include <string>
+#include <vector>
 
+#include "core/MpscQueue.h"
 #include "core/SeqLock.h"
+#include "core/SpscRing.h"
+#include "engine/EngineGraph.h"
 #include "engine/InternalClock.h"
 #include "engine/StreamTypes.h"
-#include "engine/WasapiStream.h"
 
 namespace pf8 {
+
+struct EngineMeters
+{
+    std::array<float, kNumChannels> peak{};  // block peak, linear
+    std::array<float, kNumChannels> rms{};   // block RMS, linear
+    double load = 0.0;                       // tick time / block time (EWMA)
+    double loadPeak = 0.0;                   // max over the last second
+    uint64_t ticks = 0;
+    uint64_t skippedTicks = 0;               // concurrent tick attempts rejected by the guard
+    uint64_t graphGeneration = 0;
+};
+
+// Receives each block's channel buffers (post-input, pre-processing) on the tick thread.
+// Used by the test harness now and by the recorder tap later. Must be real-time safe.
+class EngineTap
+{
+public:
+    virtual ~EngineTap() = default;
+    virtual void onChannelBlock(const float* const* channels, int numChannels, int frames) noexcept = 0;
+};
 
 class AudioEngine : public TickClient
 {
 public:
-    struct Status
-    {
-        std::string backend;       // "WASAPI"
-        std::string masterId;      // endpoint id, empty with the internal clock
-        std::string masterName;
-        StreamMode mode = StreamMode::Shared;
-        std::string sampleFormat;
-        int sampleRate = 0;
-        int requestedFrames = 0;
-        int grantedPeriod = 0;     // frames per device period
-        bool internalClock = false;
-        bool running = false;
-        double load = 0.0;         // tick time / block time, EWMA
-        double loadPeak = 0.0;     // max over the last second
-        uint64_t ticks = 0;
-        uint64_t glitches = 0;
-        StreamStatus masterStatus = StreamStatus::Closed;
-    };
+    using ClockFn = int64_t (*)(void* ctx) noexcept;
 
-    explicit AudioEngine(int sampleRate = 48000, int blockFrames = 128);
+    AudioEngine(int sampleRate, int blockFrames);
     ~AudioEngine() override;
 
-    // Starts the engine driven by `master` (a render or capture endpoint), or by the internal
-    // clock when nullopt or when the master fails to open. Returns false only if nothing runs.
-    bool start(const std::optional<StreamConfig>& master, const std::string& masterName, std::string& error);
-    void stop();
+    int sampleRate() const noexcept { return sampleRate_; }
+    int blockFrames() const noexcept { return blockFrames_; }
 
-    Status status() const;
+    // Test hook: the time source bridges use for fill linearisation (default: QPC).
+    void setClock(ClockFn fn, void* ctx) noexcept { clockFn_ = fn; clockCtx_ = ctx; }
+
+    // Control thread: publish a new graph; it takes effect at the next block boundary.
+    void setGraph(std::unique_ptr<EngineGraph> graph);
+    // Control thread: destroy graphs the engine has stopped using. Returns how many were freed.
+    int collectGarbage();
+    // Control thread: the generation the tick is currently using.
+    uint64_t activeGeneration() const noexcept { return activeGeneration_.load(); }
+
+    void startInternalClock();
+    void stopInternalClock();
+    bool internalClockRunning() const noexcept { return internal_ && internal_->running(); }
+
+    EngineMeters meters() const noexcept { return meterSnapshot_.read(); }
+    void setTap(EngineTap* tap) noexcept { tap_.store(tap, std::memory_order_release); }
+
     void tick(int numFrames) noexcept override;
 
 private:
-    class MasterCallback;
-    struct RtStats
-    {
-        double load = 0.0;
-        double loadPeak = 0.0;
-        uint64_t ticks = 0;
-    };
-
-    void renderInto(float* interleaved, int frames, int channels) noexcept;
+    void applyPendingGraph() noexcept;
+    void processBlock(int frames, int64_t nowNs) noexcept;
 
     int sampleRate_;
     int blockFrames_;
-    std::unique_ptr<MasterCallback> masterCallback_;
-    std::unique_ptr<WasapiStream> master_;
+    ClockFn clockFn_;
+    void* clockCtx_ = nullptr;
+
+    std::atomic_flag ticking_ = ATOMIC_FLAG_INIT;
+    MpscQueue<EngineGraph*> pending_{64};
+    SpscRing<EngineGraph*> retired_{128};
+    EngineGraph* graph_ = nullptr; // tick thread
+    std::atomic<uint64_t> activeGeneration_{0};
+    std::vector<std::unique_ptr<EngineGraph>> owned_; // control thread: every graph not yet freed
+
+    // Pre-allocated tick buffers.
+    std::vector<float> bridgeBuffers_; // [bridge][deviceChannel][kMaxBlock]
+    std::vector<float*> bridgePtrs_;   // [bridge][deviceChannel]
+    std::vector<float> channelBuffers_; // [channel][kMaxBlock]
+
     std::unique_ptr<InternalClock> internal_;
-
-    mutable std::mutex statusMutex_; // guards config strings (never taken on the tick)
-    Status config_;
-
-    SeqLockSnapshot<RtStats> rtSnapshot_;
-    RtStats rt_; // tick-thread only
-    double peakWindowFrames_ = 0.0;
+    SeqLockSnapshot<EngineMeters> meterSnapshot_;
+    EngineMeters meters_{}; // tick thread
     double peakAccum_ = 0.0;
-    int64_t qpcFrequency_ = 1;
+    int64_t peakWindowFrames_ = 0;
+    std::atomic<uint64_t> skipped_{0};
+    std::atomic<EngineTap*> tap_{nullptr};
+    std::array<const float*, kNumChannels> channelPtrs_{};
 };
 
 } // namespace pf8

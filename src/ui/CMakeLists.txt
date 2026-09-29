@@ -2,6 +2,7 @@ add_library(pf8_ui STATIC
     LookAndFeel.cpp
     TopBar.cpp
     DeviceListView.cpp
+    ChannelsView.cpp
     MainWindow.cpp
 )
 target_link_libraries(pf8_ui PUBLIC pf8_juce pf8_engine pf8_devices pf8_core)

@@ -4,6 +4,7 @@
 #include <memory>
 
 #include "engine/EngineController.h"
+#include "ui/ChannelsView.h"
 #include "ui/DeviceListView.h"
 #include "ui/LookAndFeel.h"
 #include "ui/TopBar.h"
@@ -18,11 +19,11 @@ public:
     void paint(juce::Graphics&) override;
 
     TopBar& topBar() noexcept { return topBar_; }
-    DeviceListView& deviceList() noexcept { return devices_; }
+    juce::TabbedComponent& tabs() noexcept { return tabs_; }
 
 private:
     TopBar topBar_;
-    DeviceListView devices_;
+    juce::TabbedComponent tabs_{juce::TabbedButtonBar::TabsAtTop};
 };
 
 class MainWindow : public juce::DocumentWindow

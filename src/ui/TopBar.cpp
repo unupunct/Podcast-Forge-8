@@ -16,28 +16,34 @@ TopBar::~TopBar() { stopTimer(); }
 void TopBar::refresh()
 {
     using namespace colours;
-    const auto s = controller_.engineStatus();
+    const auto s = controller_.status();
+    const auto m = controller_.meters();
     if (tickCount_++ % 10 == 0) cpuPercent_ = cpu_.sample();
 
     fields_.clear();
     fields_.push_back({"PROJECT", "Untitled", text});
 
-    juce::String backend = s.running ? juce::String(s.backend) + " " + toString(s.mode) : "STOPPED";
-    if (s.internalClock) backend = "INTERNAL CLOCK";
-    fields_.push_back({"BACKEND", backend, s.running ? (s.internalClock ? warn : ok) : error});
+    juce::String backend;
+    juce::Colour backendColour = ok;
+    if (s.internalClock)
+    {
+        backend = "INTERNAL CLOCK";
+        backendColour = warn;
+    }
+    else
+        backend = juce::String(s.backend) + " " + toString(s.masterMode);
+    fields_.push_back({"BACKEND", backend, backendColour});
 
-    fields_.push_back({"SAMPLE RATE", s.sampleRate > 0 ? juce::String(s.sampleRate) + " Hz" : "-", text});
+    fields_.push_back({"SAMPLE RATE", juce::String(s.sampleRate) + " Hz", text});
 
-    juce::String buffer = juce::String(s.requestedFrames) + " smp";
-    if (s.grantedPeriod > 0 && s.sampleRate > 0)
-        buffer << "  (" << s.grantedPeriod << " = "
-               << juce::String(1000.0 * s.grantedPeriod / s.sampleRate, 2) << " ms granted)";
-    fields_.push_back({"BUFFER", buffer, s.grantedPeriod == s.requestedFrames ? text : warn});
+    juce::String buffer = juce::String(s.blockFrames) + " smp (" + juce::String(1000.0 * s.blockFrames / s.sampleRate, 2) + " ms)";
+    if (!s.internalClock && s.masterPeriod > 0) buffer << "  master " << s.masterPeriod;
+    fields_.push_back({"BUFFER", buffer, s.masterPeriod > s.blockFrames * 2 ? warn : text});
 
     fields_.push_back({"CPU", juce::String(cpuPercent_, 1) + " %", cpuPercent_ > 70 ? warn : text});
-    const double loadPct = s.load * 100.0;
-    fields_.push_back({"AUDIO LOAD", juce::String(loadPct, 1) + " %  (peak " + juce::String(s.loadPeak * 100.0, 0) + ")",
-                       s.loadPeak > 0.8 ? error : (s.loadPeak > 0.5 ? warn : text)});
+    const double loadPct = m.load * 100.0;
+    fields_.push_back({"AUDIO LOAD", juce::String(loadPct, 1) + " %  (peak " + juce::String(m.loadPeak * 100.0, 0) + ")",
+                       m.loadPeak > 0.8 ? error : (m.loadPeak > 0.5 ? warn : text)});
 
     if (auto disk = diskSpace(paths::defaultProjects()))
     {
@@ -49,13 +55,16 @@ void TopBar::refresh()
         fields_.push_back({"DISK", "unavailable", error});
     }
 
-    int online = 0, total = 0;
-    for (const auto& d : controller_.registry().devices())
-    {
-        ++total;
-        if (d.online()) ++online;
-    }
-    fields_.push_back({"DEVICES", juce::String(online) + " online / " + juce::String(total), text});
+    int assigned = 0, okCount = 0;
+    for (const auto& c : s.channels)
+        for (const auto* v : {&c.mic, &c.headphones})
+            if (v->state != EndpointState::None)
+            {
+                ++assigned;
+                if (v->state == EndpointState::Ok) ++okCount;
+            }
+    fields_.push_back({"DEVICES", juce::String(okCount) + " / " + juce::String(assigned) + " OK  (" + juce::String(s.openStreams) + " streams)",
+                       okCount < assigned ? warn : text});
     fields_.push_back({"RECORD", juce::String::fromUTF8("\xe2\x97\x8f STOPPED"), textDim});
 
     repaint();

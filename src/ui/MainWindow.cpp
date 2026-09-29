@@ -2,10 +2,14 @@
 
 namespace pf8::ui {
 
-MainComponent::MainComponent(EngineController& controller) : topBar_(controller), devices_(controller)
+MainComponent::MainComponent(EngineController& controller) : topBar_(controller)
 {
     addAndMakeVisible(topBar_);
-    addAndMakeVisible(devices_);
+    tabs_.setTabBarDepth(34);
+    tabs_.setOutline(0);
+    tabs_.addTab("CHANNELS", colours::background, new ChannelsView(controller), true);
+    tabs_.addTab("DEVICES", colours::background, new DeviceListView(controller), true);
+    addAndMakeVisible(tabs_);
     setSize(1600, 900);
 }
 
@@ -15,7 +19,7 @@ void MainComponent::resized()
 {
     auto r = getLocalBounds();
     topBar_.setBounds(r.removeFromTop(56));
-    devices_.setBounds(r);
+    tabs_.setBounds(r);
 }
 
 MainWindow::MainWindow(const juce::String& title, EngineController& controller)
