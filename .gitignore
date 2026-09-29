@@ -1,0 +1,10 @@
+build/
+out/
+third_party/*/
+!third_party/README.md
+tools/
+*.exe
+*.pdb
+*.obj
+.vs/
+CMakeUserPresets.json
