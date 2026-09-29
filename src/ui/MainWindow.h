@@ -6,6 +6,8 @@
 #include "engine/EngineController.h"
 #include "ui/DeviceListView.h"
 #include "ui/DeviceMatrixView.h"
+#include "ui/DspEditor.h"
+#include "ui/MicWizard.h"
 #include "ui/LookAndFeel.h"
 #include "ui/MixerView.h"
 #include "ui/RoutingGridView.h"
@@ -28,6 +30,20 @@ private:
     juce::TabbedComponent dock_{juce::TabbedButtonBar::TabsAtTop};
 };
 
+// Opens (or brings to front) the per-channel DSP editor and mic wizard windows.
+class ChannelWindows
+{
+public:
+    explicit ChannelWindows(EngineController& c) : controller_(c) {}
+    ~ChannelWindows();
+    void openDspEditor(int channel);
+    void openWizard(int channel);
+
+private:
+    EngineController& controller_;
+    std::array<juce::Component::SafePointer<juce::DialogWindow>, kNumChannels> dsp_{}, wizard_{};
+};
+
 class MainComponent : public juce::Component
 {
 public:
@@ -41,6 +57,7 @@ public:
 private:
     TopBar topBar_;
     juce::TabbedComponent tabs_{juce::TabbedButtonBar::TabsAtTop};
+    ChannelWindows windows_;
 };
 
 class MainWindow : public juce::DocumentWindow

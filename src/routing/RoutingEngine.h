@@ -27,6 +27,8 @@ struct RoutingInputs
     const float* cartsR = nullptr;
     const float* talkback = nullptr; // mono
     const float* remote = nullptr;   // mono
+    const float* fxL = nullptr;      // reverb return
+    const float* fxR = nullptr;
 };
 
 struct RoutingOutputs
@@ -47,6 +49,8 @@ public:
     // Tick-side state for meters / UI.
     bool anySolo() const noexcept { return anySolo_; }
     bool anyPfl() const noexcept { return anyPfl_; }
+    // Post-fader, post-mute signal of a channel from the last process() call (for effect sends).
+    const float* postFader(int channel) const noexcept { return post_.data() + static_cast<size_t>(channel) * maxBlock_; }
     MonitorSource effectiveMonitorSource() const noexcept { return monitorSource_; }
 
 private:

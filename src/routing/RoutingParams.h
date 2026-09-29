@@ -74,6 +74,8 @@ struct RoutingParams
         }
         gain[static_cast<size_t>(idx(SourceId::Remote))][idx(BusId::Main)].set(1.0f);
         gain[static_cast<size_t>(idx(SourceId::Remote))][idx(BusId::Clean)].set(1.0f);
+        gain[static_cast<size_t>(idx(SourceId::Fx))][idx(BusId::Main)].set(1.0f);
+        gain[static_cast<size_t>(idx(SourceId::Fx))][idx(BusId::Clean)].set(1.0f);
         for (int hp = 0; hp < kRoutingChannels; ++hp) applyPersonalTemplate(hp);
     }
 
@@ -85,6 +87,7 @@ struct RoutingParams
         gain[static_cast<size_t>(idx(SourceId::Music))][bus].set(0.2f);
         gain[static_cast<size_t>(idx(SourceId::Carts))][bus].set(0.5f);
         gain[static_cast<size_t>(idx(SourceId::Remote))][bus].set(0.7f);
+        gain[static_cast<size_t>(idx(SourceId::Fx))][bus].set(0.7f);
         gain[static_cast<size_t>(idx(SourceId::Talkback))][bus].set(0.0f); // talkback uses its own path
     }
 };

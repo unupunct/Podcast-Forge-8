@@ -17,7 +17,7 @@ float* row(std::vector<float>& v, int r, int maxBlock) { return v.data() + stati
 
 const char* toString(SourceId s) noexcept
 {
-    static const char* names[] = {"CH1", "CH2", "CH3", "CH4", "CH5", "CH6", "CH7", "CH8", "Music", "Carts", "Talkback", "Remote"};
+    static const char* names[] = {"CH1", "CH2", "CH3", "CH4", "CH5", "CH6", "CH7", "CH8", "Music", "Carts", "Talkback", "Remote", "Reverb"};
     const int i = idx(s);
     return i >= 0 && i < kSourceCount ? names[i] : "?";
 }
@@ -256,6 +256,9 @@ void RoutingEngine::process(const RoutingInputs& in, RoutingOutputs& out, int n)
     const auto music = static_cast<size_t>(idx(SourceId::Music));
     const auto carts = static_cast<size_t>(idx(SourceId::Carts));
     const auto remote = static_cast<size_t>(idx(SourceId::Remote));
+    const auto fx = static_cast<size_t>(idx(SourceId::Fx));
+    addStereo(mainL, mainR, in.fxL, in.fxR, matrix_[fx][idx(BusId::Main)], n);
+    addStereo(cleanL, cleanR, in.fxL, in.fxR, matrix_[fx][idx(BusId::Clean)], n);
     addStereo(mainL, mainR, in.musicL, in.musicR, matrix_[music][idx(BusId::Main)], n);
     addStereo(mainL, mainR, in.cartsL, in.cartsR, matrix_[carts][idx(BusId::Main)], n);
     addStereo(musL, musR, in.musicL, in.musicR, matrix_[music][idx(BusId::MusicOut)], n);
@@ -302,6 +305,7 @@ void RoutingEngine::process(const RoutingInputs& in, RoutingOutputs& out, int n)
             addStereo(l, r, in.musicL, in.musicR, matrix_[music][static_cast<size_t>(bus)], n);
             addStereo(l, r, in.cartsL, in.cartsR, matrix_[carts][static_cast<size_t>(bus)], n);
             addMono(l, r, in.remote, matrix_[remote][static_cast<size_t>(bus)], tmpL_.data(), tmpR_.data(), n);
+            addStereo(l, r, in.fxL, in.fxR, matrix_[fx][static_cast<size_t>(bus)], n);
         }
         else
         {

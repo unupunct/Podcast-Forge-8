@@ -111,3 +111,31 @@
   entirely; a built-in canary (a deliberately broken layout that must be flagged) now fails the run
   if the checker ever stops checking. With the checker working it found: PAN dial 32 px at
   1080p/150 %, CONFIG text overflow, crowded fader scale — all fixed.
+
+## Stage 5 — DSP (2026-09-29)
+
+**Added**
+- `src/dsp`: RBJ biquads (TDF-II, coefficient interpolation), A-weighting, 12/24 dB Butterworth HPF,
+  4-band parametric EQ (peak / shelves), noise gate (sidechain HPF, hysteresis, hold, range),
+  feed-forward soft-knee compressor (RMS/peak detector, auto makeup), split-band de-esser, look-ahead
+  brick-wall limiter with true-peak option, Freeverb-topology reverb, `ChannelStrip` chain with
+  S-curve bypass crossfades and constant 72-sample latency, compressor and EQ presets from DSP.md,
+  `MicAnalyzer`.
+- Engine: per-channel strips before the record tap, mic-wizard analysis tap (raw input ring),
+  shared reverb → routing source FX, true-peak master limiters on Main and Clean, strip meters.
+- UI: `DspEditor` (CONFIG) with every parameter, presets, EQ/HPF response curve, live gate /
+  de-esser / compressor activity; `MicWizard` (detect → noise → speech → results → Apply software
+  settings; hardware gain is never touched).
+- `--verify-ui` covers the DSP editor and the wizard (30 screens).
+
+**Verified**
+- 70 tests incl. DSP.md §6: HPF −3 dB at fc ±2 %, slopes, EQ gain at fc ±0.1 dB, compressor static curve
+  ±0.2 dB at 10 levels, gate timing, limiter never above the ceiling (overdriven sines + impulse trains,
+  sample and true peak), exact latency passthrough, de-esser selectivity, reverb decay, mic analysis and
+  recommendations, zero RT allocations. Live (BRIO + VB-Cable, WASAPI shared): audio-thread load 3.7 %
+  average, 11 % peak with 8 strips, routing, reverb and master limiters.
+
+**Found and fixed during the stage**
+- Limiter delay line one sample too long (73 vs 72): the delayed sample fell outside the look-ahead
+  window protecting it. Caught by the latency-passthrough test.
+- Linear bypass crossfade left a slope corner; replaced with a raised cosine.

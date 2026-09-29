@@ -57,14 +57,22 @@ A split-band sidechain: band-pass (frequency 3–12 kHz, default 6.5 kHz, Q 2) �
 up to `amount` dB (0–18), proportional to the overshoot, so only the sibilant band is reduced.
 
 ### Limiter
-Look-ahead brick-wall limiter: 1.5 ms look-ahead (pre-allocated delay line), peak hold, 50 ms
-release, ceiling −12…0 dBFS (default −1). True-peak option: 4× oversampled peak detection on the
-master. The limiter adds latency: the 1.5 ms is applied to every channel equally so tracks stay aligned
-with each other (the latency is constant and reported).
+Look-ahead brick-wall limiter: 1.5 ms look-ahead (72 samples at 48 kHz), 50 ms release, ceiling
+−12…0 dBFS (default −1). The gain for each output sample is ≤ the requirement of every sample in
+its look-ahead window: sliding window minimum → box average of that minimum over the window →
+release smoothing that only ever raises the gain toward the allowed value → a final clamp against
+float rounding. This makes "never exceeds the ceiling" a structural property, not a tuning result.
+True-peak option (on by default on the master): 4× cubic-Hermite inter-sample peak estimate.
+The 72-sample look-ahead is present on every channel also when the limiter is off, so all channels
+have the same constant latency and tracks stay aligned. Turning a limiter off lets its gain glide
+back to unity over the release time (no step).
 
 ### Reverb send
-One shared JUCE `juce::dsp::Reverb` (room preset) fed by per-channel post-fader sends; the return goes
-to Main (default −∞ = off) and optionally HP buses. Off by default.
+One shared room reverb (Freeverb topology: 8 damped combs + 4 all-passes per side, implemented in
+`dsp/Reverb.cpp`) fed by per-channel post-fader sends (default 0 = off). Its stereo return is the
+routing source **FX** (Main 100 %, Clean 100 %, headphones 70 % by default). The send is computed
+from the current block and the return enters the routing on the next block — a 1-block delay that is
+inaudible for a reverb and keeps the tick free of a routing feedback loop.
 
 ### Master
 Master fader, master limiter (default −1 dBFS ceiling, true-peak on), mute.
@@ -119,7 +127,11 @@ RMS 20 ms. When above threshold (default −35 dBFS) for more than the attack ti
 gain ramps to −depth (default −15 dB) over the attack time; when below for the hold time (500 ms) →
 returns over the release time (1.5 s). Hysteresis 3 dB.
 
-## 6. Verification targets (tested)
+## 6. Verification targets (tested — `tests/unit/test_dsp.cpp`, all passing)
+
+Measured notes: the digital A-weighting (bilinear, 48 kHz) reads −1.95 dB at 10 kHz against the IEC
+−2.5 dB — immaterial for the wizard's noise-floor measurement; tested with a 0.7 dB tolerance.
+
 
 - HPF −3 dB at fc ±2 %, 12/24 dB/oct slope ±1 dB one octave below.
 - Peak EQ gain at fc ±0.1 dB.

@@ -20,12 +20,67 @@ void MixerPage::resized()
     mixer_.setBounds(r);
 }
 
-MainComponent::MainComponent(EngineController& controller) : topBar_(controller)
+ChannelWindows::~ChannelWindows()
+{
+    for (auto* arr : {&dsp_, &wizard_})
+        for (auto& w : *arr)
+            if (w) delete w.getComponent();
+}
+
+void ChannelWindows::openDspEditor(int channel)
+{
+    auto& slot = dsp_[static_cast<size_t>(channel)];
+    if (slot)
+    {
+        slot->toFront(true);
+        return;
+    }
+    auto* editor = new DspEditor(controller_, channel);
+    editor->setSize(1280, 760);
+    editor->onRunWizard = [this](int ch) { openWizard(ch); };
+    juce::DialogWindow::LaunchOptions o;
+    o.content.setOwned(editor);
+    o.dialogTitle = "Channel " + juce::String(channel + 1) + " processing";
+    o.dialogBackgroundColour = colours::background;
+    o.escapeKeyTriggersCloseButton = true;
+    o.useNativeTitleBar = true;
+    o.resizable = true;
+    slot = o.launchAsync();
+    if (slot) slot->setResizeLimits(1100, 680, 4000, 3000);
+}
+
+void ChannelWindows::openWizard(int channel)
+{
+    auto& slot = wizard_[static_cast<size_t>(channel)];
+    if (slot)
+    {
+        slot->toFront(true);
+        return;
+    }
+    auto* wiz = new MicWizard(controller_, channel);
+    wiz->setSize(860, 600);
+    juce::DialogWindow::LaunchOptions o;
+    o.content.setOwned(wiz);
+    o.dialogTitle = "Microphone setup - channel " + juce::String(channel + 1);
+    o.dialogBackgroundColour = colours::background;
+    o.escapeKeyTriggersCloseButton = true;
+    o.useNativeTitleBar = true;
+    o.resizable = false;
+    slot = o.launchAsync();
+    juce::Component::SafePointer<juce::DialogWindow> safe = slot;
+    wiz->onClose = [safe] {
+        if (safe) safe->exitModalState(0), delete safe.getComponent();
+    };
+}
+
+MainComponent::MainComponent(EngineController& controller) : topBar_(controller), windows_(controller)
 {
     addAndMakeVisible(topBar_);
     tabs_.setTabBarDepth(32);
     tabs_.setOutline(0);
-    tabs_.addTab("MIXER", colours::background, new MixerPage(controller), true);
+    auto* page = new MixerPage(controller);
+    page->mixer().onConfigureChannel = [this](int ch) { windows_.openDspEditor(ch); };
+    tabs_.addTab("MIXER", colours::background, page, true);
     tabs_.addTab("DEVICE MATRIX", colours::background, new DeviceMatrixView(controller), true);
     tabs_.addTab("DEVICES", colours::background, new DeviceListView(controller), true);
     addAndMakeVisible(tabs_);

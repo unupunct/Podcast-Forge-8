@@ -5,7 +5,9 @@
 #include "core/Json.h"
 #include "ui/ChannelStripView.h"
 #include "ui/MainWindow.h"
+#include "ui/DspEditor.h"
 #include "ui/MasterStripView.h"
+#include "ui/MicWizard.h"
 #include "ui/Widgets.h"
 
 namespace pf8::ui {
@@ -204,6 +206,55 @@ VerifyUiResult runVerifyUi(EngineController& controller, const std::filesystem::
                 screens.emplace_back(std::move(s));
             }
         }
+    }
+    // Dialog screens at their minimum and typical sizes, at every scale.
+    {
+        struct Dlg { const char* name; int w, h; };
+        const Dlg dialogs[] = {{"dsp-editor", 1100, 680}, {"dsp-editor", 1440, 880}, {"mic-wizard", 860, 600}};
+        for (const auto& d : dialogs)
+            for (float scale : {1.0f, 1.5f, 2.0f})
+            {
+                std::unique_ptr<juce::Component> comp;
+                if (std::string(d.name) == "dsp-editor")
+                {
+                    auto* e = new DspEditor(controller, 0);
+                    controller.engine().dsp(0).compOn = true;
+                    comp.reset(e);
+                }
+                else
+                {
+                    auto* w = new MicWizard(controller, 0);
+                    dsp::MicAnalysis r;
+                    r.haveNoise = r.haveSpeech = r.signalDetected = true;
+                    r.noiseFloorDb = -58.3f;
+                    r.peakDb = -9.4f;
+                    r.averageDb = -27.1f;
+                    r.clipCount = 12;
+                    r.recommendedTrimDb = 3.4f;
+                    r.hpfHz = 100.0f;
+                    r.advice = {"The microphone clipped 12 times: lower the gain ON THE MICROPHONE / interface. Software trim cannot repair clipping.",
+                                "Low-frequency rumble detected: high-pass set to 100 Hz."};
+                    w->showResultsForTest(r);
+                    comp.reset(w);
+                }
+                comp->setVisible(true);
+                comp->setSize(d.w, d.h);
+                std::vector<std::string> issues;
+                check(*comp, "", issues);
+                const std::string tag = std::string(d.name) + "_" + std::to_string(d.w) + "x" + std::to_string(d.h) + "@" +
+                                        std::to_string(static_cast<int>(scale * 100)) + "pct";
+                for (auto& i : issues) result.issues.push_back(tag + ": " + i);
+                auto image = comp->createComponentSnapshot(comp->getLocalBounds(), true, scale);
+                juce::File jf(juce::String((outDir / (tag + ".png")).wstring().c_str()));
+                jf.deleteFile();
+                if (auto stream = jf.createOutputStream()) juce::PNGImageFormat().writeImageToStream(image, *stream);
+                ++result.screensRendered;
+                json::Object s;
+                s["screen"] = tag;
+                s["issues"] = static_cast<int>(issues.size());
+                screens.emplace_back(std::move(s));
+            }
+        controller.engine().setAnalysisChannel(-1);
     }
     juce::LookAndFeel::setDefaultLookAndFeel(nullptr);
 

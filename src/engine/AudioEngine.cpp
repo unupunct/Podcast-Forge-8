@@ -25,12 +25,16 @@ AudioEngine::AudioEngine(int sampleRate, int blockFrames)
     for (size_t c = 0; c < kNumChannels; ++c) channelPtrs_[c] = channelBuffers_.data() + c * kMaxBlock;
 
     routing_.prepare(sampleRate_, kMaxBlock);
-    for (auto& t : trim_)
-    {
-        t.setLength(std::max(1, sampleRate_ / 50)); // 20 ms
-        t.reset(1.0f);
-    }
+    for (auto& s : strips_) s.prepare(sampleRate_, kMaxBlock);
     for (auto& a : recordArm_) a.store(true);
+    reverb_.prepare(sampleRate_);
+    reverbIn_.assign(kMaxBlock, 0.0f);
+    fxL_.assign(kMaxBlock, 0.0f);
+    fxR_.assign(kMaxBlock, 0.0f);
+    routingIn_.fxL = fxL_.data();
+    routingIn_.fxR = fxR_.data();
+    mainLimiter_.prepare(sampleRate_, 2, kMaxBlock);
+    cleanLimiter_.prepare(sampleRate_, 2, kMaxBlock);
     busBuffers_.assign(static_cast<size_t>(kBusCount) * 2 * kMaxBlock, 0.0f);
     for (size_t b = 0; b < kBusCount; ++b)
     {
@@ -175,13 +179,13 @@ void AudioEngine::processBlock(int frames, int64_t nowNs) noexcept
             }
         }
 
-        // Input trim (Stage 5 moves this into the full DSP chain).
-        {
-            auto& trim = trim_[static_cast<size_t>(ch)];
-            trim.setTarget(dbToGain(std::clamp(dsp_[static_cast<size_t>(ch)].inputTrimDb.get(), -24.0f, 24.0f)));
-            if (trim.ramping() || trim.current() != 1.0f)
-                for (int i = 0; i < frames; ++i) dst[i] *= trim.next();
-        }
+        // Mic wizard tap: raw input, before trim and processing.
+        if (analysisChannel_.load(std::memory_order_relaxed) == ch)
+            analysisRing_.push(dst, static_cast<size_t>(frames));
+
+        // Channel strip: trim → polarity → HPF → gate → EQ → de-esser → compressor → limiter.
+        strips_[static_cast<size_t>(ch)].process(dst, frames, dsp_[static_cast<size_t>(ch)]);
+        meters_.strip[static_cast<size_t>(ch)] = strips_[static_cast<size_t>(ch)].meters();
 
         float pk = 0.0f;
         double sq = 0.0;
@@ -197,8 +201,46 @@ void AudioEngine::processBlock(int frames, int64_t nowNs) noexcept
 
     if (EngineTap* tap = tap_.load(std::memory_order_acquire)) tap->onChannelBlock(channelPtrs_.data(), kNumChannels, frames);
 
-    // 3. Routing: channels (post-DSP from Stage 5) → Main, Clean, Music, HP 1–8, PFL, Monitor.
+    // 3. Routing: channels (post-DSP) → Main, Clean, Music, HP 1–8, PFL, Monitor. The reverb
+    //    return used here was computed from the previous block's sends (one block later — inaudible).
     routing_.process(routingIn_, routingOut_, frames);
+
+    // 3a. Shared reverb: post-fader sends of this block → return for the next block.
+    {
+        float sendSum = 0.0f;
+        std::fill(reverbIn_.begin(), reverbIn_.begin() + frames, 0.0f);
+        for (int ch = 0; ch < kNumChannels; ++ch)
+        {
+            const float send = std::clamp(dsp_[static_cast<size_t>(ch)].reverbSend.get(), 0.0f, 1.0f);
+            if (send <= 0.0f) continue;
+            sendSum += send;
+            const float* post = routing_.postFader(ch);
+            for (int i = 0; i < frames; ++i) reverbIn_[static_cast<size_t>(i)] += post[i] * send;
+        }
+        std::fill(fxL_.begin(), fxL_.begin() + frames, 0.0f);
+        std::fill(fxR_.begin(), fxR_.begin() + frames, 0.0f);
+        reverb_.setParameters(masterDsp_.reverbRoomSize.get(), masterDsp_.reverbDamping.get(), masterDsp_.reverbWidth.get());
+        // Always run while sends exist or the tail is still ringing (cheap enough to run always).
+        (void)sendSum;
+        reverb_.processAdd(reverbIn_.data(), fxL_.data(), fxR_.data(), frames, std::clamp(masterDsp_.reverbReturn.get(), 0.0f, 1.0f));
+    }
+
+    // 3b. Master limiters on the program buses (true-peak by default).
+    {
+        const bool on = masterDsp_.limiterOn.load(std::memory_order_relaxed);
+        const float ceil = std::clamp(masterDsp_.limiterCeilingDb.get(), -12.0f, 0.0f);
+        const bool tp = masterDsp_.truePeak.load(std::memory_order_relaxed);
+        for (auto* lim : {&mainLimiter_, &cleanLimiter_})
+        {
+            lim->setCeilingDb(ceil);
+            lim->setTruePeak(tp);
+        }
+        float* mainCh[2] = {routingOut_.left[idx(BusId::Main)], routingOut_.right[idx(BusId::Main)]};
+        float* cleanCh[2] = {routingOut_.left[idx(BusId::Clean)], routingOut_.right[idx(BusId::Clean)]};
+        mainLimiter_.process(mainCh, frames, on);
+        cleanLimiter_.process(cleanCh, frames, on);
+        meters_.masterLimiterGrDb = mainLimiter_.gainReductionDb();
+    }
     for (size_t b = 0; b < kBusCount; ++b)
     {
         float pl = 0.0f, pr = 0.0f;

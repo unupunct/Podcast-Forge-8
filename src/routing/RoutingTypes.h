@@ -13,8 +13,9 @@ enum class SourceId : uint8_t
     Carts = 9,
     Talkback = 10,
     Remote = 11,
+    Fx = 12, // shared reverb return (stereo)
 };
-constexpr int kSourceCount = 12;
+constexpr int kSourceCount = 13;
 
 enum class BusId : uint8_t
 {

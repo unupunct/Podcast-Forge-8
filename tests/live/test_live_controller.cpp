@@ -76,6 +76,8 @@ TEST_CASE("Live: USB mic -> VB-Cable loop through the multi-device engine", "[li
                 toString(hp.state), toString(hp.bridge.status), hp.bridge.ppm, hp.master ? 1 : 0,
                 s.masterName.c_str(), s.internalClock ? 1 : 0, static_cast<unsigned long long>(m.ticks));
 
+    std::printf("  audio load %.1f %% (peak %.1f %%), skipped ticks %llu\n", m.load * 100.0, m.loadPeak * 100.0, static_cast<unsigned long long>(m.skippedTicks));
+    CHECK(m.loadPeak < 0.5);
     CHECK(s.channels[0].mic.state == EndpointState::Ok);
     CHECK(s.channels[1].mic.state == EndpointState::Ok);
     CHECK(hp.state == EndpointState::Ok);

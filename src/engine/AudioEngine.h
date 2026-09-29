@@ -16,7 +16,10 @@
 #include "engine/EngineGraph.h"
 #include "engine/InternalClock.h"
 #include "engine/StreamTypes.h"
+#include "dsp/ChannelStrip.h"
 #include "dsp/DspParams.h"
+#include "dsp/Dynamics.h"
+#include "dsp/Reverb.h"
 #include "routing/RoutingEngine.h"
 
 namespace pf8 {
@@ -32,6 +35,8 @@ struct EngineMeters
     uint64_t graphGeneration = 0;
     std::array<std::array<float, 2>, kBusCount> busPeak{}; // per bus, L/R block peak
     bool anySolo = false, anyPfl = false;
+    std::array<dsp::StripMeters, kNumChannels> strip{};     // gate / comp / de-ess / limiter activity
+    float masterLimiterGrDb = 0.0f;
 };
 
 // Receives each block's channel buffers (post-input, pre-processing) on the tick thread.
@@ -77,6 +82,12 @@ public:
     MasterDspParams& masterDsp() noexcept { return masterDsp_; }
     std::atomic<bool>& recordArm(int channel) noexcept { return recordArm_[static_cast<size_t>(channel)]; }
 
+    // Mic wizard: the raw input (before trim and DSP) of one channel is copied into a ring the UI
+    // thread drains. -1 stops it.
+    void setAnalysisChannel(int channel) noexcept { analysisChannel_.store(channel, std::memory_order_release); }
+    size_t readAnalysis(float* dst, size_t max) noexcept { return analysisRing_.pop(dst, max); }
+    int dspLatency() const noexcept { return strips_[0].latency(); }
+
     void tick(int numFrames) noexcept override;
 
 private:
@@ -111,7 +122,12 @@ private:
     std::array<ChannelDspParams, kNumChannels> dsp_;
     MasterDspParams masterDsp_;
     std::array<std::atomic<bool>, kNumChannels> recordArm_{};
-    std::array<Ramp, kNumChannels> trim_;
+    std::array<dsp::ChannelStrip, kNumChannels> strips_;
+    std::atomic<int> analysisChannel_{-1};
+    SpscRing<float> analysisRing_{48000 * 12};
+    dsp::Reverb reverb_;
+    std::vector<float> reverbIn_, fxL_, fxR_;
+    dsp::Limiter mainLimiter_, cleanLimiter_;
     std::vector<float> busBuffers_; // [bus][L/R][kMaxBlock]
     RoutingInputs routingIn_{};
     RoutingOutputs routingOut_{};
