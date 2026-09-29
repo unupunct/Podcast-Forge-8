@@ -118,6 +118,8 @@ TEST_CASE("Assignments JSON round-trip", "[devices][identity]")
     as.ch[4].headphones = identityOf(usbDev("hp-5", Flow::Render, 9, 9, "", false, "HP 5"));
     as.ch[4].hpPair = 2;
     as.ch[7].name = "Producer";
+    as.outputs[static_cast<size_t>(OutputRole::Monitor)].device = identityOf(usbDev("mon", Flow::Render, 7, 7, "M1", true, "Monitors"));
+    as.outputs[static_cast<size_t>(OutputRole::CleanStream)].pair = 1;
     as.preferredMaster = "hp-5";
     auto back = assignmentsFromJson(toJson(as));
     REQUIRE(back.has_value());

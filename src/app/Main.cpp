@@ -10,6 +10,7 @@
 #include "core/SettingsDb.h"
 #include "engine/EngineController.h"
 #include "ui/MainWindow.h"
+#include "ui/VerifyUi.h"
 
 namespace pf8 {
 
@@ -32,6 +33,25 @@ public:
 
         log::start({paths::logs()});
         PF8_LOG_INFO("app", "app.start version=%s", JUCE_APPLICATION_VERSION_STRING);
+
+        if (args.contains("--verify-ui"))
+        {
+            // Offscreen UI self-test: no settings, no persisted assignments, no desktop capture.
+            EngineController verifyController(EngineController::Settings{}, nullptr);
+            verifyController.start();
+            verifyController.waitIdle();
+            const auto r = ui::runVerifyUi(verifyController, paths::verifyOutput());
+            juce::String out;
+            out << "verify-ui: " << r.screensRendered << " screens, " << static_cast<int>(r.issues.size()) << " issues\n";
+            for (const auto& i : r.issues) out << "  " << juce::String::fromUTF8(i.c_str()) << "\n";
+            out << "output: " << juce::String(r.outputDir.wstring().c_str()) << "\n";
+            cli::writeStdout(out);
+            PF8_LOG_INFO("app", "verify-ui screens=%d issues=%zu", r.screensRendered, r.issues.size());
+            log::stop();
+            setApplicationReturnValue(r.issues.empty() ? 0 : 1);
+            quit();
+            return;
+        }
 
         std::string dbError;
         if (!settings_.open(paths::settingsDb(), &dbError))

@@ -1,6 +1,6 @@
 # Stage gate: configure (if needed), build Release x64, run unit + harness tests.
-# Usage:  .\scripts\gate.ps1 [-Live] [-VerifyUi]
-param([switch]$Live, [switch]$VerifyUi, [switch]$Reconfigure)
+# Usage:  .\scripts\gate.ps1 [-Live] [-SkipVerifyUi]   (the offscreen UI self-test runs by default)
+param([switch]$Live, [switch]$SkipVerifyUi, [switch]$Reconfigure)
 $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $root = Split-Path -Parent $root
@@ -25,7 +25,7 @@ if ($Live) {
     if ($LASTEXITCODE -ne 0) { Write-Output 'GATE: live tests FAILED'; exit 1 }
 }
 
-if ($VerifyUi) {
+if (-not $SkipVerifyUi) {
     $exe = Get-Item 'build\release\bin\PodcastForge8.exe'
     $p = Start-Process $exe.FullName -ArgumentList '--verify-ui' -Wait -PassThru -NoNewWindow
     if ($p.ExitCode -ne 0) { Write-Output "GATE: verify-ui FAILED ($($p.ExitCode))"; exit 1 }

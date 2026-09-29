@@ -81,3 +81,33 @@
 - 56 tests: ROUTING.md invariants 1–5 (exact gains, talkback lock, solo/PFL bit-exact isolation of
   Main/Clean/HP, mute vs record tap, ramp slope), pan law, HP modes, monitor section, talkback dim,
   cough state machine, zero RT allocations; the 10-minute harness run passes through routing.
+
+## Stage 4 — Mixer UI, Device Matrix, --verify-ui (2026-09-29)
+
+**Added**
+- Console widgets: rotary `Knob`, dB `Fader` (−∞…+10 dB, skewed, collision-free scale), `Meter`
+  (mono/stereo, peak + RMS + 1.5 s hold + clip latch, −18/−6 dBFS guides), `ToggleLed` in function
+  colours (mute red, solo yellow, PFL teal, DSP blue, REC red, MON violet), `StatusLed`.
+- `ChannelStripView` ×8: CH/name (double-click to rename), input device + status LED, GAIN (input
+  trim, live), GATE/COMP/EQ/DE-ESS (bound; processing in Stage 5), PAN, MUTE/SOLO/PFL, fader,
+  meter, REC arm, MON (headphones on/off), CONFIG (mic wizard hook).
+- `MasterStripView`: stereo program meter, master fader, LIMITER, MUTE; MONITOR source (auto-PFL
+  shown), monitor output device, volume, DIM, MONO, MUTE.
+- `RoutingGridView` (bottom dock): 12 sources × 11 buses, drag to set, double-click toggles,
+  editing a headphone column switches it to Custom; talkback row shows LOCKED and HP targets.
+- `DeviceMatrixView`: channel rows (mic, input channel, headphones, status, sync, meter), output
+  roles (Monitor, Stream Main / Clean / Music), unassigned-device pool, drag and drop (pool → cell,
+  cell → cell swaps), per-cell device menu, AUTO ASSIGN with a confirmation listing every change
+  (Return and Escape cancel).
+- `proposeAutoAssign` / `applyProposal`: fills only empty cells (headsets paired by container, USB
+  only), never overwrites — also not a cell assigned between proposal and confirmation.
+- Output roles in `Assignments` + controller reconcile + `EngineGraph::busOutputs`; per-channel
+  input trim (ramped), REC arm, DSP enable flags (`dsp/DspParams.h`).
+- `--verify-ui`: 3 pages × 7 resolution/scale configurations (1080p 100/125/150 %, 1440p 100/150 %,
+  2160p 150/200 %), layout checks, PNGs + report.json; now part of `scripts\gate.ps1`.
+
+**Found and fixed during the stage**
+- The first verify runs reported 0 issues because the offscreen root was invisible and skipped
+  entirely; a built-in canary (a deliberately broken layout that must be flagged) now fails the run
+  if the checker ever stops checking. With the checker working it found: PAN dial 32 px at
+  1080p/150 %, CONFIG text overflow, crowded fader scale — all fixed.

@@ -47,9 +47,22 @@ struct ChannelAssignment
     bool operator==(const ChannelAssignment&) const = default;
 };
 
+// Outputs that are not a channel's headphones.
+enum class OutputRole : uint8_t { Monitor = 0, MainStream, CleanStream, MusicStream };
+constexpr int kOutputRoles = 4;
+const char* toString(OutputRole r) noexcept;
+
+struct OutputAssignment
+{
+    std::optional<DeviceIdentity> device;
+    int pair = 0;
+    bool operator==(const OutputAssignment&) const = default;
+};
+
 struct Assignments
 {
     std::array<ChannelAssignment, 8> ch;
+    std::array<OutputAssignment, kOutputRoles> outputs;
     std::string preferredMaster; // endpoint id, empty = automatic
     bool operator==(const Assignments&) const = default;
 
@@ -66,5 +79,6 @@ struct ChannelResolution
     Resolution headphones;
 };
 std::array<ChannelResolution, 8> resolveAll(const Assignments& a, const std::vector<DeviceInfo>& devices);
+std::array<Resolution, kOutputRoles> resolveOutputs(const Assignments& a, const std::vector<DeviceInfo>& devices);
 
 } // namespace pf8

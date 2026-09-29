@@ -70,38 +70,61 @@ void TopBar::refresh()
     repaint();
 }
 
+namespace {
+// Widths proportional to the typical length of each field's content.
+const float kWeights[] = {1.0f, 1.9f, 1.0f, 2.1f, 0.8f, 1.45f, 1.05f, 1.75f, 1.0f};
+juce::Font captionFont() { return juce::Font(juce::FontOptions(10.5f, juce::Font::bold)); }
+juce::Font valueFont() { return juce::Font(juce::FontOptions(13.5f)); }
+float textW(const juce::Font& f, const juce::String& s)
+{
+    juce::GlyphArrangement ga;
+    ga.addLineOfText(f, s, 0.0f, 0.0f);
+    return ga.getBoundingBox(0, -1, true).getWidth();
+}
+} // namespace
+
+std::vector<juce::Rectangle<float>> TopBar::cells() const
+{
+    std::vector<juce::Rectangle<float>> out;
+    auto area = getLocalBounds().reduced(12, 6).toFloat();
+    float total = 0.0f;
+    for (size_t i = 0; i < fields_.size() && i < std::size(kWeights); ++i) total += kWeights[i];
+    float x = area.getX();
+    for (size_t i = 0; i < fields_.size() && i < std::size(kWeights); ++i)
+    {
+        const float fw = area.getWidth() * kWeights[i] / total;
+        out.emplace_back(x, area.getY(), fw - 10.0f, area.getHeight());
+        x += fw;
+    }
+    return out;
+}
+
 void TopBar::paint(juce::Graphics& g)
 {
     using namespace colours;
     g.fillAll(panel);
     g.setColour(outline);
     g.drawHorizontalLine(getHeight() - 1, 0.0f, static_cast<float>(getWidth()));
-
-    const float scale = static_cast<float>(getHeight()) / 56.0f;
-    auto area = getLocalBounds().reduced(juce::roundToInt(12 * scale), juce::roundToInt(6 * scale));
-    const juce::Font caption(juce::FontOptions(10.5f * scale, juce::Font::bold));
-    const juce::Font value(juce::FontOptions(14.0f * scale));
-
-    // Widths proportional to the typical length of each field's content.
-    static const float weights[] = {1.1f, 1.5f, 0.9f, 2.0f, 0.7f, 1.3f, 1.0f, 1.1f, 1.0f};
-    float totalWeight = 0.0f;
-    for (size_t i = 0; i < fields_.size() && i < std::size(weights); ++i) totalWeight += weights[i];
-
-    const float w = static_cast<float>(area.getWidth());
-    float x = static_cast<float>(area.getX());
-    for (size_t i = 0; i < fields_.size() && i < std::size(weights); ++i)
+    const auto cs = cells();
+    for (size_t i = 0; i < cs.size(); ++i)
     {
-        const float fw = w * weights[i] / totalWeight;
-        auto cell = juce::Rectangle<float>(x, static_cast<float>(area.getY()), fw - 8.0f * scale,
-                                           static_cast<float>(area.getHeight()));
+        auto cell = cs[i];
         g.setColour(textDim);
-        g.setFont(caption);
+        g.setFont(captionFont());
         g.drawText(fields_[i].caption, cell.removeFromTop(cell.getHeight() * 0.42f), juce::Justification::bottomLeft, true);
         g.setColour(fields_[i].colour);
-        g.setFont(value);
+        g.setFont(valueFont());
         g.drawText(fields_[i].value, cell, juce::Justification::centredLeft, true);
-        x += fw;
     }
+}
+
+void TopBar::collectLayoutIssues(std::vector<std::string>& issues) const
+{
+    const auto cs = cells();
+    for (size_t i = 0; i < cs.size(); ++i)
+        if (textW(valueFont(), fields_[i].value) > cs[i].getWidth())
+            issues.push_back("top bar " + fields_[i].caption.toStdString() + " value '" + fields_[i].value.toStdString() + "' clipped at " +
+                             std::to_string(static_cast<int>(cs[i].getWidth())) + " px");
 }
 
 } // namespace pf8::ui

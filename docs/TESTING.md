@@ -60,6 +60,14 @@ zero size, overlaps a sibling unexpectedly, has text clipped (a label with a str
 bounds), or throws. Writes PNGs to `%LOCALAPPDATA%\PodcastForge8\verify\` for optional manual review.
 No desktop screen capture is ever used.
 
+As built: 3 pages (Mixer, Device Matrix, Devices) × 7 configurations — 1920×1080 at 100/125/150 %,
+2560×1440 at 100/150 %, 3840×2160 at 150/200 % — with eight long, realistic, OFFLINE device names.
+Checks: zero-size visible components, children outside their parent, overlapping controls inside
+console strips, button/label text wider than its bounds (labels explicitly marked ellipsis-OK, such
+as device names with the full name in the tooltip, are exempt), knob dials under 36 px, fader travel
+under 80 px, and self-drawn text via `LayoutSelfCheck`. A canary layout with three known defects
+must produce three issues, otherwise the run fails.
+
 ## 5. End-to-end (`--e2e`)
 
 1. Enumerate real devices; assign every real capture endpoint present to channels 1…k and fill the

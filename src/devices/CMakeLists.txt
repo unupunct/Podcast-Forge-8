@@ -3,6 +3,7 @@ add_library(pf8_devices STATIC
     DeviceRegistry.cpp
     DeviceIdentity.cpp
     HotplugWatcher.cpp
+    AutoAssign.cpp
     WinEndpointEnumerator.cpp
 )
 target_link_libraries(pf8_devices PUBLIC pf8_core PRIVATE setupapi cfgmgr32 ole32 propsys)

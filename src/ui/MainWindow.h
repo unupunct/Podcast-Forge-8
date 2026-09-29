@@ -4,12 +4,29 @@
 #include <memory>
 
 #include "engine/EngineController.h"
-#include "ui/ChannelsView.h"
 #include "ui/DeviceListView.h"
+#include "ui/DeviceMatrixView.h"
 #include "ui/LookAndFeel.h"
+#include "ui/MixerView.h"
+#include "ui/RoutingGridView.h"
 #include "ui/TopBar.h"
 
 namespace pf8::ui {
+
+// MIXER page: the console on top, the bottom dock (ROUTING, and later HEADPHONES, SOUNDBOARD,
+// MUSIC, MARKERS) below.
+class MixerPage : public juce::Component
+{
+public:
+    explicit MixerPage(EngineController& controller);
+    void resized() override;
+    MixerView& mixer() noexcept { return mixer_; }
+    juce::TabbedComponent& dock() noexcept { return dock_; }
+
+private:
+    MixerView mixer_;
+    juce::TabbedComponent dock_{juce::TabbedButtonBar::TabsAtTop};
+};
 
 class MainComponent : public juce::Component
 {
@@ -35,6 +52,7 @@ public:
 
 private:
     LookAndFeel lookAndFeel_;
+    juce::TooltipWindow tooltips_{nullptr, 600};
 };
 
 } // namespace pf8::ui

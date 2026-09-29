@@ -54,6 +54,7 @@ struct ChannelView
 
 struct ControllerStatus
 {
+    std::array<EndpointView, kOutputRoles> outputs;
     std::string backend = "WASAPI";
     bool running = false;
     bool internalClock = false;
@@ -86,6 +87,8 @@ public:
     void rescanDevices();
     void assignMic(int channel, std::optional<std::string> endpointId, int micChannel = -1);
     void assignHeadphones(int channel, std::optional<std::string> endpointId, int pair = 0);
+    void assignOutput(OutputRole role, std::optional<std::string> endpointId, int pair = 0);
+    void applyAssignments(const Assignments& a); // e.g. a confirmed Auto Assign proposal
     void acceptPossibleMatch(int channel, bool mic);
     void setChannelName(int channel, std::string name);
 
@@ -94,6 +97,7 @@ public:
     void waitIdle();
 
     const DeviceRegistry& registry() const noexcept { return registry_; }
+    AudioEngine& engine() noexcept { return engine_; }
     ControllerStatus status() const;
     EngineMeters meters() const noexcept { return engine_.meters(); }
     Assignments assignments() const;
@@ -120,6 +124,7 @@ private:
     mutable std::mutex stateMutex_; // guards the members below against the UI's status() reads
     Assignments assignments_;
     std::array<ChannelResolution, kNumChannels> resolution_{};
+    std::array<Resolution, kOutputRoles> outputResolution_{};
     std::map<std::string, std::unique_ptr<Endpoint>> endpoints_; // key: "c:" / "r:" + endpoint id
     std::map<std::string, std::string> failures_;                // key → last open error
     std::string masterKey_;

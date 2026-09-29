@@ -287,6 +287,35 @@ void EngineController::assignHeadphones(int channel, std::optional<std::string> 
     });
 }
 
+void EngineController::assignOutput(OutputRole role, std::optional<std::string> endpointId, int pair)
+{
+    post([this, role, endpointId, pair] {
+        {
+            std::lock_guard lock(stateMutex_);
+            auto& o = assignments_.outputs[static_cast<size_t>(role)];
+            o.pair = pair;
+            if (!endpointId) o.device.reset();
+            else if (auto d = registry_.find(*endpointId)) o.device = identityOf(*d);
+        }
+        PF8_LOG_INFO("device", "assign output role=%s id=%s", toString(role), endpointId ? endpointId->c_str() : "none");
+        saveAssignments();
+        reconcile();
+    });
+}
+
+void EngineController::applyAssignments(const Assignments& a)
+{
+    post([this, a] {
+        {
+            std::lock_guard lock(stateMutex_);
+            assignments_ = a;
+        }
+        PF8_LOG_INFO("device", "assignments applied");
+        saveAssignments();
+        reconcile();
+    });
+}
+
 void EngineController::acceptPossibleMatch(int channel, bool mic)
 {
     post([this, channel, mic] {
@@ -433,6 +462,16 @@ void EngineController::reconcile()
         }
     }
 
+    const auto outRes = resolveOutputs(a, devices);
+    for (size_t r = 0; r < outRes.size(); ++r)
+        if (outRes[r].kind == MatchKind::Exact || outRes[r].kind == MatchKind::Fingerprint)
+        {
+            auto& n = needed[keyFor(Flow::Render, outRes[r].endpointId)];
+            n.flow = Flow::Render;
+            n.id = outRes[r].endpointId;
+            n.pairs = std::max(n.pairs, a.outputs[r].pair + 1);
+        }
+
     // Master selection among the endpoints we'll run (failed ones are excluded).
     std::vector<MasterCandidate> candidates;
     for (const auto& [key, n] : needed)
@@ -508,6 +547,19 @@ void EngineController::reconcile()
             }
             g->channels[i] = route;
         }
+        static constexpr BusId roleBus[kOutputRoles] = {BusId::Monitor, BusId::Main, BusId::Clean, BusId::MusicOut};
+        for (size_t r = 0; r < outRes.size(); ++r)
+        {
+            if (outRes[r].kind != MatchKind::Exact && outRes[r].kind != MatchKind::Fingerprint) continue;
+            auto it = outIdx.find(keyFor(Flow::Render, outRes[r].endpointId));
+            if (it == outIdx.end()) continue;
+            // An endpoint pair already used as a channel's headphones is not also a bus output.
+            bool clash = false;
+            for (size_t i = 0; i < res.size(); ++i)
+                if (g->channels[i].outputBridge == it->second && g->channels[i].outputPair == a.outputs[r].pair) clash = true;
+            if (clash) continue;
+            g->busOutputs[static_cast<size_t>(idx(roleBus[r]))] = BusOutput{it->second, a.outputs[r].pair};
+        }
         engine_.setGraph(std::move(g));
     };
     if (!closing.empty()) publishGraph();
@@ -546,6 +598,7 @@ void EngineController::reconcile()
         masterRunning = !masterKey.empty() && endpoints_.count(masterKey) > 0;
         masterKey_ = masterRunning ? masterKey : std::string();
         resolution_ = res;
+        outputResolution_ = outRes;
         if (changedIds) assignments_ = a;
     }
     if (masterRunning)
@@ -633,6 +686,8 @@ ControllerStatus EngineController::status() const
         view(a.mic, resolution_[i].mic, Flow::Capture, c.mic);
         view(a.headphones, resolution_[i].headphones, Flow::Render, c.headphones);
     }
+    for (size_t r = 0; r < kOutputRoles; ++r)
+        view(assignments_.outputs[r].device, outputResolution_[r], Flow::Render, s.outputs[r]);
     return s;
 }
 

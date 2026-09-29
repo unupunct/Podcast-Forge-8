@@ -16,6 +16,7 @@
 #include "engine/EngineGraph.h"
 #include "engine/InternalClock.h"
 #include "engine/StreamTypes.h"
+#include "dsp/DspParams.h"
 #include "routing/RoutingEngine.h"
 
 namespace pf8 {
@@ -70,8 +71,11 @@ public:
     EngineMeters meters() const noexcept { return meterSnapshot_.read(); }
     void setTap(EngineTap* tap) noexcept { tap_.store(tap, std::memory_order_release); }
 
-    // Routing parameters (UI/control threads write, the tick reads).
+    // Parameters (UI/control threads write, the tick reads).
     RoutingParams& routing() noexcept { return routing_.params(); }
+    ChannelDspParams& dsp(int channel) noexcept { return dsp_[static_cast<size_t>(channel)]; }
+    MasterDspParams& masterDsp() noexcept { return masterDsp_; }
+    std::atomic<bool>& recordArm(int channel) noexcept { return recordArm_[static_cast<size_t>(channel)]; }
 
     void tick(int numFrames) noexcept override;
 
@@ -104,6 +108,10 @@ private:
     std::atomic<uint64_t> skipped_{0};
     std::atomic<EngineTap*> tap_{nullptr};
     RoutingEngine routing_;
+    std::array<ChannelDspParams, kNumChannels> dsp_;
+    MasterDspParams masterDsp_;
+    std::array<std::atomic<bool>, kNumChannels> recordArm_{};
+    std::array<Ramp, kNumChannels> trim_;
     std::vector<float> busBuffers_; // [bus][L/R][kMaxBlock]
     RoutingInputs routingIn_{};
     RoutingOutputs routingOut_{};

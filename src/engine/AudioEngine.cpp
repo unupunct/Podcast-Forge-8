@@ -25,6 +25,12 @@ AudioEngine::AudioEngine(int sampleRate, int blockFrames)
     for (size_t c = 0; c < kNumChannels; ++c) channelPtrs_[c] = channelBuffers_.data() + c * kMaxBlock;
 
     routing_.prepare(sampleRate_, kMaxBlock);
+    for (auto& t : trim_)
+    {
+        t.setLength(std::max(1, sampleRate_ / 50)); // 20 ms
+        t.reset(1.0f);
+    }
+    for (auto& a : recordArm_) a.store(true);
     busBuffers_.assign(static_cast<size_t>(kBusCount) * 2 * kMaxBlock, 0.0f);
     for (size_t b = 0; b < kBusCount; ++b)
     {
@@ -167,6 +173,14 @@ void AudioEngine::processBlock(int frames, int64_t nowNs) noexcept
                     dst[i] = s * scale;
                 }
             }
+        }
+
+        // Input trim (Stage 5 moves this into the full DSP chain).
+        {
+            auto& trim = trim_[static_cast<size_t>(ch)];
+            trim.setTarget(dbToGain(std::clamp(dsp_[static_cast<size_t>(ch)].inputTrimDb.get(), -24.0f, 24.0f)));
+            if (trim.ramping() || trim.current() != 1.0f)
+                for (int i = 0; i < frames; ++i) dst[i] *= trim.next();
         }
 
         float pk = 0.0f;

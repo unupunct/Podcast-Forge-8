@@ -4,16 +4,18 @@
 
 #include "core/SystemStats.h"
 #include "engine/EngineController.h"
+#include "ui/Widgets.h"
 
 namespace pf8::ui {
 
-class TopBar : public juce::Component, private juce::Timer
+class TopBar : public juce::Component, public LayoutSelfCheck, private juce::Timer
 {
 public:
     explicit TopBar(EngineController& controller);
     ~TopBar() override;
 
     void paint(juce::Graphics&) override;
+    void collectLayoutIssues(std::vector<std::string>& issues) const override;
     void refresh(); // pulls status now (also called by the 10 Hz timer)
 
     struct Field
@@ -26,6 +28,7 @@ public:
 
 private:
     void timerCallback() override { refresh(); }
+    std::vector<juce::Rectangle<float>> cells() const;
 
     EngineController& controller_;
     CpuMeter cpu_;

@@ -16,6 +16,12 @@ inline const juce::Colour ok         {0xff3ecf6e};
 inline const juce::Colour warn       {0xfff2b134};
 inline const juce::Colour error      {0xfff0524f};
 inline const juce::Colour record     {0xffe53935};
+// Function colours (hardware-console convention).
+inline const juce::Colour mute       {0xffe5484d};
+inline const juce::Colour solo       {0xfff5c518};
+inline const juce::Colour pfl        {0xff35c7a6};
+inline const juce::Colour dsp        {0xff5aa9ff};
+inline const juce::Colour mon        {0xff7c8cff};
 } // namespace colours
 
 class LookAndFeel : public juce::LookAndFeel_V4
@@ -23,6 +29,14 @@ class LookAndFeel : public juce::LookAndFeel_V4
 public:
     LookAndFeel();
     juce::Font labelFont(float height, bool bold = false) const;
+
+    void drawRotarySlider(juce::Graphics&, int x, int y, int w, int h, float pos, float start, float end,
+                          juce::Slider&) override;
+    void drawLinearSlider(juce::Graphics&, int x, int y, int w, int h, float pos, float minPos, float maxPos,
+                          juce::Slider::SliderStyle, juce::Slider&) override;
+    juce::Font getTextButtonFont(juce::TextButton&, int buttonHeight) override;
+    int getSliderThumbRadius(juce::Slider&) override;
+    static float faderCapHeight(int sliderWidth) noexcept;
 };
 
 } // namespace pf8::ui

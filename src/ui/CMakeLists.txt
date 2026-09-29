@@ -2,7 +2,13 @@ add_library(pf8_ui STATIC
     LookAndFeel.cpp
     TopBar.cpp
     DeviceListView.cpp
-    ChannelsView.cpp
+    Widgets.cpp
+    ChannelStripView.cpp
+    MasterStripView.cpp
+    MixerView.cpp
+    RoutingGridView.cpp
+    DeviceMatrixView.cpp
+    VerifyUi.cpp
     MainWindow.cpp
 )
 target_link_libraries(pf8_ui PUBLIC pf8_juce pf8_engine pf8_devices pf8_core)

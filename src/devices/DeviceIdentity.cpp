@@ -110,6 +110,18 @@ Resolution resolve(const DeviceIdentity& saved, const std::vector<DeviceInfo>& d
     return {};
 }
 
+const char* toString(OutputRole r) noexcept
+{
+    switch (r)
+    {
+        case OutputRole::Monitor:     return "Monitor";
+        case OutputRole::MainStream:  return "Stream: Main";
+        case OutputRole::CleanStream: return "Stream: Clean feed";
+        case OutputRole::MusicStream: return "Stream: Music";
+    }
+    return "?";
+}
+
 Assignments Assignments::defaults()
 {
     Assignments a;
@@ -135,6 +147,15 @@ std::string toJson(const Assignments& a)
         channels.emplace_back(std::move(o));
     }
     root["channels"] = std::move(channels);
+    json::Array outs;
+    for (const auto& o : a.outputs)
+    {
+        json::Object j;
+        j["device"] = o.device ? identityToJson(*o.device) : json::Value();
+        j["pair"] = o.pair;
+        outs.emplace_back(std::move(j));
+    }
+    root["outputs"] = std::move(outs);
     return json::serialize(json::Value(std::move(root)), true);
 }
 
@@ -154,7 +175,21 @@ std::optional<Assignments> assignmentsFromJson(const std::string& text)
         a.ch[i].headphones = identityFromJson(c["headphones"]);
         a.ch[i].hpPair = c["hpPair"].asInt(0);
     }
+    const auto& outs = (*v)["outputs"].asArray();
+    for (size_t i = 0; i < a.outputs.size() && i < outs.size(); ++i)
+    {
+        a.outputs[i].device = identityFromJson(outs[i]["device"]);
+        a.outputs[i].pair = outs[i]["pair"].asInt(0);
+    }
     return a;
+}
+
+std::array<Resolution, kOutputRoles> resolveOutputs(const Assignments& a, const std::vector<DeviceInfo>& devices)
+{
+    std::array<Resolution, kOutputRoles> out{};
+    for (size_t i = 0; i < out.size(); ++i)
+        if (a.outputs[i].device) out[i] = resolve(*a.outputs[i].device, devices, {});
+    return out;
 }
 
 std::array<ChannelResolution, 8> resolveAll(const Assignments& a, const std::vector<DeviceInfo>& devices)
