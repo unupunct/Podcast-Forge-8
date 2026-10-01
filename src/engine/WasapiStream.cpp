@@ -230,9 +230,25 @@ bool WasapiStream::open(std::string& error)
     d.device->GetState(&state);
     if (state != DEVICE_STATE_ACTIVE) { error = "endpoint not active"; status_ = StreamStatus::Disconnected; return false; }
 
+    // Every (re)activation re-applies the raw-stream request, which must precede Initialize.
     auto activate = [&]() -> HRESULT {
         d.client.Reset();
-        return d.device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, reinterpret_cast<void**>(d.client.GetAddressOf()));
+        rawGranted_ = false;
+        const HRESULT a = d.device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, reinterpret_cast<void**>(d.client.GetAddressOf()));
+        if (SUCCEEDED(a) && config_.raw && config_.mode != StreamMode::Exclusive)
+        {
+            ComPtr<IAudioClient2> c2;
+            if (SUCCEEDED(d.client.As(&c2)))
+            {
+                AudioClientProperties p{};
+                p.cbSize = sizeof(p);
+                p.bIsOffload = FALSE;
+                p.eCategory = AudioCategory_Media;
+                p.Options = AUDCLNT_STREAMOPTIONS_RAW;
+                rawGranted_ = SUCCEEDED(c2->SetClientProperties(&p));
+            }
+        }
+        return a;
     };
     if (FAILED(h = activate())) { error = "Activate " + hr(h); status_ = StreamStatus::Failed; return false; }
 
@@ -374,9 +390,9 @@ bool WasapiStream::open(std::string& error)
 
     d.scratch.assign(static_cast<size_t>(bufferFrames_) * static_cast<size_t>(channels_) * 2, 0.0f);
 
-    PF8_LOG_INFO("stream", "open id=%s flow=%s mode=%s rate=%d ch=%d fmt=%s period=%d buffer=%d",
+    PF8_LOG_INFO("stream", "open id=%s flow=%s mode=%s rate=%d ch=%d fmt=%s period=%d buffer=%d effects=%s",
                  config_.endpointId.c_str(), toString(config_.flow), toString(grantedMode_), sampleRate_, channels_,
-                 sampleFormatName(), periodFrames_, bufferFrames_);
+                 sampleFormatName(), periodFrames_, bufferFrames_, effectsBypassed() ? "bypassed" : "windows");
     return true;
 }
 

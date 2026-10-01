@@ -123,3 +123,24 @@ TEST_CASE("Talkback can use a channel's processed mic as its source", "[harness]
     CHECK(std::abs(h.engine().meters().talkbackPeak - h.engine().meters().peak[2]) < 1e-6f);
     CHECK(h.engine().meters().talkbackPeak > 0.25f);
 }
+
+TEST_CASE("Custom headphone mix: a centred channel arrives at -3 dB (pan law)", "[harness][headphones]")
+{
+    EngineHarness h(48000, 128);
+    h.addOutput(device("hp8", 2, true));
+    h.route(7, -1, -1, 0);
+    auto& e = h.engine();
+    e.setSimulatedSource(0, 410.0f, 0.1f);
+    auto& rp = e.routing();
+    rp.headphones[7].mode = HpMode::Custom;
+    for (int s = 0; s < kSourceCount; ++s) rp.gain[static_cast<size_t>(s)][hpBus(7)].set(0.0f);
+    rp.gain[0][hpBus(7)].set(1.0f);
+    h.commitGraph();
+    h.captureFrom(1.0);
+    h.run(2.0);
+    const auto& y = h.outputCapture(0);
+    REQUIRE(y.size() > 24000);
+    const double a = toneAmplitude(y.data() + 4800, 16384, 410.0, 48000);
+    INFO("HP8 left amplitude " << a << " (" << 20 * std::log10(a) << " dB)");
+    CHECK(std::abs(20 * std::log10(a) - (-23.01)) < 0.3);
+}

@@ -14,6 +14,7 @@ struct AppSettings
     StreamMode mode = StreamMode::Shared;
     double uiScale = 1.0;       // 1.0 … 2.0
     bool debugLog = false;
+    bool rawStreams = true;     // bypass Windows audio effects
 
     static AppSettings load(const SettingsDb* db); // invalid / missing values → defaults
     bool save(SettingsDb* db) const;

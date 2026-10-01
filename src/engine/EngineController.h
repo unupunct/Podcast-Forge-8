@@ -44,6 +44,7 @@ struct EndpointView
     bool master = false;
     int deviceRate = 0, deviceChannels = 0, periodFrames = 0;
     StreamMode mode = StreamMode::Shared;
+    bool effectsBypassed = false; // Windows audio effects bypassed (raw / exclusive)
 };
 
 struct ChannelView
@@ -90,6 +91,7 @@ public:
         int sampleRate = 48000;
         int blockFrames = 128;
         StreamMode mode = StreamMode::Shared;
+        bool raw = true; // bypass Windows audio effects where the driver allows it
     };
 
     EngineController(Settings settings, SettingsDb* db);

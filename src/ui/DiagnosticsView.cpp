@@ -128,7 +128,8 @@ void DiagnosticsView::timerCallback()
             r.ppm = juce::String(v.bridge.ppm, 1);
             r.fill = juce::String(v.bridge.fill, 0) + " / " + juce::String(v.bridge.target, 0);
             r.xruns = juce::String(static_cast<juce::int64>(v.bridge.underruns)) + " / " + juce::String(static_cast<juce::int64>(v.bridge.overruns));
-            r.format = juce::String(v.deviceRate) + " Hz  " + juce::String(v.deviceChannels) + " ch  " + juce::String(v.periodFrames) + " fr";
+            r.format = juce::String(v.deviceRate) + " Hz  " + juce::String(v.deviceChannels) + " ch  " + juce::String(v.periodFrames) + " fr" +
+                       (v.effectsBypassed ? "  raw" : "  Windows FX");
             r.warn = v.bridge.status == SyncStatus::Unstable || std::abs(v.bridge.ppm) > 500.0;
         }
         rows_.push_back(r);

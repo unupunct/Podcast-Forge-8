@@ -248,3 +248,26 @@ TEST_CASE("Headphone and monitor protection limiters never exceed their ceilings
     CHECK(h.engine().meters().hpProtectGrDb[0] < -10.0f);
     CHECK(h.engine().meters().monitorProtectGrDb < -6.0f);
 }
+
+TEST_CASE("Harness: a 2-channel input with drift keeps a steady level on the mixed channel", "[harness][sync]")
+{
+    EngineHarness h(48000, 128);
+    auto mic = input("stereo-mic", 43.0, 480, [](int, double t) { return static_cast<float>(0.1 * std::sin(2 * kPi * 300.0 * t)); });
+    mic.channels = 2;
+    h.addInput(mic);
+    h.addOutput(output("hp-master", 0.0, 480, true));
+    h.route(0, 0, -1, 0); // mix of both device channels
+    h.engine().dsp(0).hpfOn = false;
+    h.commitGraph();
+    h.captureFrom(2.0);
+    h.run(14.0);
+    const auto& y = h.channelCapture(0);
+    REQUIRE(y.size() > 48000 * 10);
+    for (double ts : {1.0, 4.0, 7.0, 10.0})
+    {
+        const auto at = static_cast<size_t>(ts * 48000);
+        const double a = toneAmplitude(y.data() + at, 16384, 300.0, 48000);
+        INFO("t=" << ts << " amplitude " << 20 * std::log10(a) << " dB");
+        CHECK(std::abs(20 * std::log10(a) - (-20.0)) < 0.2);
+    }
+}

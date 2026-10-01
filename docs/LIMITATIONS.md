@@ -29,6 +29,22 @@ Maintained as each stage lands. Windows-specific constraints first.
 - **Virtual devices make poor master clocks.** VB-Cable's timing is jittery (the live tests use it as
   master and still lock, but with more residual correction noise than a USB headset would give).
 
+## Windows audio effects
+
+- Shared-mode streams ask Windows to bypass the endpoint's audio effects (raw streams: no AGC,
+  loudness equalisation, noise suppression or "enhancements" on mics and mixes; Settings → Audio,
+  on by default). A driver that does not support raw mode keeps its effects; the Diagnostics page
+  and the e2e report show "Windows FX" for such a stream. Exclusive mode always bypasses them.
+- The Windows endpoint volume still applies in shared mode (it is not an effect); keep device
+  volumes at 100 % for predictable levels.
+
+## Audio engine settings
+
+- Sample rate, engine block and WASAPI mode apply at the next start (the engine is not rebuilt
+  while running).
+- The EQ curve display is drawn for 48 kHz; at 44.1 / 96 kHz the audio is correct, only the drawn
+  curve near the top octave differs slightly.
+
 ## Device identity
 
 - Assignments are stored by Windows endpoint ID and restored only on an exact match, or on a

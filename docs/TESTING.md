@@ -70,11 +70,27 @@ must produce three issues, otherwise the run fails.
 
 ## 5. End-to-end (`--e2e`)
 
-1. Enumerate real devices; assign every real capture endpoint present to channels 1…k and fill the
-   rest with simulated sources (sine/pink); assign real render endpoints to headphones where present
-   (VB-Cable captures one headphone mix back via its capture side, closing a real loop).
-2. Run N seconds (default 60) with recording on, pre-roll 5 s, one marker, one cart, music with
-   ducking, a talkback press.
-3. Verify: files exist with the expected frame counts; the loopback through VB-Cable contains the
-   injected tone at the expected level; talkback absent from MainMix; drift status per device;
-   xrun counters; JSON report written.
+`PodcastForge8.exe --e2e [--seconds=N] [--out=<dir>] [--loop-input=N] [--trace]` (default 60 s,
+output `%LOCALAPPDATA%\PodcastForge8\e2e\`). It runs without a settings database, so the user's
+saved assignments are neither used nor changed.
+
+1. Real capture endpoints feed CH2…CH5; the other channels get simulated sines at -20 dBFS
+   (CH6 is the talkback mic and is muted, so it is on no bus). **Real speakers and headphones are
+   never used — no test tone is played out loud.** When VB-Cable is installed, HP8 → CABLE Input …
+   CABLE Output → CH7 closes a real playback-to-capture loop (CH7 is muted on every bus so the loop
+   can't feed Main; its pre-fader track is still recorded). HP8 is a Custom mix of CH1 only.
+2. Records N s with 5 s pre-roll, a marker at 2 s, a generated cart at 3 s, a generated music file
+   with ducking (and its own track), and a talkback press to HP8 from 4 to 6 s.
+3. Verifies: journal finalised, no dropouts, pre-roll exactly 5 s, every file's length; simulated
+   tones at -20.0 dBFS ±1 dB on their isolated tracks; CH1 on Main at the pan-law level (-23.01 dB
+   ±0.5); cart on Main; talkback absent from Main (< -80 dBFS); music present and ducking engaged;
+   the VB-Cable loop at the level predicted from the routing and the Windows endpoint volumes
+   (±1 dB) and the talkback arriving on HP8; markers; per stream: sync state, xruns and whether
+   Windows audio effects were bypassed; watchdog. Writes `e2e-report.json` (with the diagnostics
+   report) and prints PASS / FAIL / WARN per check; exit code 0 = pass.
+
+What the first real runs found (both fixed): (a) the loop through VB-Cable came back up to 3.9 dB
+off, gliding over ~2 s after every level change — Windows' own effects on the endpoints (an AGC)
+were processing our shared-mode streams; streams now request `AUDCLNT_STREAMOPTIONS_RAW`, and the
+loop measures -23.05 dB for -23.01 expected. (b) A 44.1 / 96 kHz engine would have asked for the
+wrong low-latency period (48 kHz was assumed).

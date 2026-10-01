@@ -30,6 +30,8 @@ public:
     int periodFrames() const noexcept { return periodFrames_; }
     int bufferFrames() const noexcept { return bufferFrames_; }
     StreamMode grantedMode() const noexcept { return grantedMode_; }
+    // Windows audio effects are bypassed (raw stream, or exclusive mode).
+    bool effectsBypassed() const noexcept { return rawGranted_ || grantedMode_ == StreamMode::Exclusive; }
     const char* sampleFormatName() const noexcept;
     const StreamStats& stats() const noexcept { return stats_; }
 
@@ -48,6 +50,7 @@ private:
     int periodFrames_ = 0;
     int bufferFrames_ = 0;
     StreamMode grantedMode_ = StreamMode::Shared;
+    bool rawGranted_ = false;
 };
 
 } // namespace pf8

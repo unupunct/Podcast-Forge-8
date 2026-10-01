@@ -94,6 +94,9 @@ std::optional<int> runHeadless(const juce::StringArray& args)
                     "  --list-devices   print all audio endpoints as JSON\n"
                     "  --recover <dir>  rebuild the file headers of an interrupted recording session\n"
                     "  --verify-ui      offscreen UI self-test\n"
+                    "  --e2e [--seconds=N] [--out=<dir>] [--loop-input=N] [--trace]\n"
+                    "                   end-to-end test on the real audio devices (never plays out loud;\n"
+                    "                   uses VB-Cable for a real loopback when installed)\n"
                     "  --help           this text\n");
         return 0;
     }

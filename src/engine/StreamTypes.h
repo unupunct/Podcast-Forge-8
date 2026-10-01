@@ -20,6 +20,9 @@ struct StreamConfig
     StreamMode mode = StreamMode::Shared;
     int requestedRate = 48000;   // exclusive mode only; shared mode uses the mix rate
     int requestedFrames = 128;   // desired period
+    // Shared mode: ask Windows to bypass the endpoint's audio effects (AGC, loudness equalisation,
+    // noise suppression, "enhancements") — AUDCLNT_STREAMOPTIONS_RAW. Ignored where unsupported.
+    bool raw = true;
 };
 
 struct StreamStats

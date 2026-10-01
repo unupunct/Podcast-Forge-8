@@ -5,6 +5,7 @@
 #include <memory>
 
 #include "app/CliModes.h"
+#include "app/E2E.h"
 #include "core/Log.h"
 #include "core/Paths.h"
 #include "core/SettingsDb.h"
@@ -35,6 +36,15 @@ public:
         log::start({paths::logs()});
         PF8_LOG_INFO("app", "app.start version=%s", JUCE_APPLICATION_VERSION_STRING);
 
+        if (args.contains("--e2e"))
+        {
+            const int code = cli::runE2E(args);
+            log::stop();
+            setApplicationReturnValue(code);
+            quit();
+            return;
+        }
+
         if (args.contains("--verify-ui"))
         {
             // Offscreen UI self-test: no settings, no persisted assignments, no desktop capture.
@@ -64,6 +74,7 @@ public:
         es.sampleRate = app.sampleRate;
         es.blockFrames = app.blockFrames;
         es.mode = app.mode;
+        es.raw = app.rawStreams;
         PF8_LOG_INFO("app", "engine rate=%d block=%d mode=%d", es.sampleRate, es.blockFrames, static_cast<int>(es.mode));
         controller_ = std::make_unique<EngineController>(es, settings_.isOpen() ? &settings_ : nullptr);
         controller_->start();

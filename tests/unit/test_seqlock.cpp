@@ -24,12 +24,19 @@ TEST_CASE("SeqLockSnapshot readers never see a torn value", "[core]")
                 reads.fetch_add(1);
             }
     });
-    for (int64_t i = 1; i <= 1'000'000; ++i) snap.write(Pair{i, -i, {}});
+    // Keep writing until the reader has overlapped the writer many times (under a loaded test run the
+    // reader thread may not even be scheduled during the first million writes).
+    int64_t i = 0;
+    while (i < 1'000'000 || (reads.load() < 10'000 && i < 200'000'000))
+    {
+        ++i;
+        snap.write(Pair{i, -i, {}});
+    }
     done.store(true);
     reader.join();
     REQUIRE(torn.load() == 0);
-    REQUIRE(reads.load() > 0);
-    REQUIRE(snap.read().a == 1'000'000);
+    REQUIRE(reads.load() >= 10'000);
+    REQUIRE(snap.read().a == i);
 }
 
 TEST_CASE("AtomicParam stores and loads", "[core]")

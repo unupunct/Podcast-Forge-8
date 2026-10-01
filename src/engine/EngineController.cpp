@@ -378,6 +378,7 @@ std::string EngineController::diagnosticsReport() const
         o["rate"] = v.deviceRate;
         o["channels"] = v.deviceChannels;
         o["period"] = v.periodFrames;
+        o["windowsEffects"] = v.state == EndpointState::Ok ? (v.effectsBypassed ? "bypassed" : "active") : "-";
         o["sync"] = toString(v.bridge.status);
         o["ppm"] = v.bridge.ppm;
         o["fill"] = v.bridge.fill;
@@ -642,6 +643,7 @@ std::unique_ptr<EngineController::Endpoint> EngineController::openEndpoint(const
     sc.endpointId = endpointId;
     sc.flow = flow;
     sc.mode = settings_.mode;
+    sc.raw = settings_.raw;
     sc.requestedRate = settings_.sampleRate;
     sc.requestedFrames = settings_.blockFrames;
     e->stream = std::make_unique<WasapiStream>(sc, e->handler.get());
@@ -944,6 +946,7 @@ ControllerStatus EngineController::status() const
                     v.deviceChannels = e->second->stream->channels();
                     v.periodFrames = e->second->stream->periodFrames();
                     v.mode = e->second->stream->grantedMode();
+                    v.effectsBypassed = e->second->stream->effectsBypassed();
                     if (e->second->handler->in) v.bridge = e->second->handler->in->read();
                     if (e->second->handler->out) v.bridge = e->second->handler->out->read();
                 }

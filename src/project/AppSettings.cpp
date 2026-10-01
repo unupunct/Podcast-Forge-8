@@ -32,6 +32,7 @@ AppSettings AppSettings::load(const SettingsDb* db)
     const int scale = getInt(db, "ui.scalePercent", 100);
     if (scale >= 100 && scale <= 200) s.uiScale = scale / 100.0;
     s.debugLog = getInt(db, "log.debug", 0) == 1;
+    s.rawStreams = getInt(db, "audio.raw", 1) == 1;
     return s;
 }
 
@@ -43,6 +44,7 @@ bool AppSettings::save(SettingsDb* db) const
     ok = db->set("audio.mode", std::to_string(static_cast<int>(mode))) && ok;
     ok = db->set("ui.scalePercent", std::to_string(static_cast<int>(uiScale * 100.0 + 0.5))) && ok;
     ok = db->set("log.debug", debugLog ? "1" : "0") && ok;
+    ok = db->set("audio.raw", rawStreams ? "1" : "0") && ok;
     return ok;
 }
 

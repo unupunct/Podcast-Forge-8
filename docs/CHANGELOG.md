@@ -281,3 +281,35 @@
   values ignored and missing files reported; project create / unique folders / atomic save /
   reopen / sessions; archive contents and no-overwrite; Unicode recording regression. 65 UI
   screens; real-app start → quit smoke run clean (`app.running` reset).
+
+## Stage 13 - Diagnostics, watchdog, settings, end-to-end (2026-10-01)
+
+**Added**
+- Tick watchdog (own thread): no engine tick for 500 ms while the control thread is idle -> error,
+  diagnostics report, controlled audio restart (every stream closed and reopened; a recording keeps
+  running), at most 3 restarts per minute. Glitch log (per-stream underruns / overruns, stalls,
+  restarts; 500 entries) and a JSON diagnostics report (`Diagnostics\diagnostics-*.json`).
+- DIAGNOSTICS tab: CPU, audio load, clock, ticks, watchdog, recorder throughput, a 256 MB
+  write-through disk speed test (own temp file, removed), per-stream table (state, sync, ppm,
+  fill/target, xruns, format, Windows effects), glitch log, SAVE REPORT, RESTART AUDIO.
+- SETTINGS tab: Audio & performance (rate, block, WASAPI mode, Windows-effects bypass - next start),
+  Devices (preferred master, rescan), Routing & monitoring, Recording & projects, Master DSP,
+  Hotkeys (bindings, global, cough modes, conflicts, Windows registration errors), Appearance
+  (interface size, live), Logging & privacy (debug log, live). `AppSettings` in Settings.db.
+- Raw WASAPI streams (`AUDCLNT_STREAMOPTIONS_RAW`) so Windows AGC / enhancements never process
+  the mics or mixes; reported per stream.
+- `--e2e`: real-device end-to-end run (TESTING.md section 5), simulated sources, VB-Cable loopback,
+  never plays out loud, JSON report.
+- verify-ui renders every main tab and every settings page (128 screens).
+
+**Fixed**
+- Real loopback measured up to 3.9 dB off with a slow glide: Windows endpoint effects; fixed by raw
+  streams (now -23.05 dB for -23.01 expected).
+- Low-latency shared period assumed a 48 kHz engine.
+- SeqLock test could fail under a loaded parallel run when the reader thread was never scheduled
+  during the writes (test-design race; the seqlock itself was never torn).
+
+**Verified**
+- 111 tests (watchdog verdicts and rate limit, AppSettings round trip and rejects, 2-channel
+  drifting input level, custom headphone pan level); 128 UI screens; `--e2e --seconds=30` on the
+  real devices (Logitech BRIO + VB-Cable loop): all checks PASS, no warnings.

@@ -190,6 +190,8 @@ public:
             {&combo({"Shared (works with every app)", "Shared low-latency", "Exclusive (lowest latency, device not shared)"},
                     static_cast<int>(s_.mode), [this](int i) { s_.mode = static_cast<StreamMode>(i); save(); })},
             "Exclusive falls back to shared when a device refuses it.");
+        row("Windows audio effects", {&toggle("BYPASS", s_.rawStreams, [this](bool on) { s_.rawStreams = on; save(); })},
+            "Recommended: Windows AGC, loudness equalisation and noise suppression never touch the mics or mixes (raw streams).");
         section("Running now");
         const auto& now = c.settings();
         row("Engine", {&info(juce::String(now.sampleRate) + " Hz, " + juce::String(now.blockFrames) + " samples (" +
