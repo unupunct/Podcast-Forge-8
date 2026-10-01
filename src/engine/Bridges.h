@@ -22,7 +22,7 @@
 #include "engine/DriftController.h"
 #include "engine/StreamTypes.h"
 #include "engine/TimeDll.h"
-#include "engine/VarResampler.h"
+#include "dsp/VarResampler.h"
 
 namespace pf8 {
 

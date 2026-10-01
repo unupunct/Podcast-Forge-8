@@ -10,6 +10,7 @@
 #include "ui/HeadphonesView.h"
 #include "ui/MarkersView.h"
 #include "ui/MicWizard.h"
+#include "ui/SoundboardView.h"
 #include "ui/TransportBar.h"
 #include "ui/LookAndFeel.h"
 #include "ui/MixerView.h"

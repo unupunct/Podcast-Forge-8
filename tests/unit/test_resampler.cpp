@@ -4,7 +4,7 @@
 
 #include "Analysis.h"
 #include "core/RealtimeGuard.h"
-#include "engine/VarResampler.h"
+#include "dsp/VarResampler.h"
 
 using namespace pf8;
 using namespace pf8test;

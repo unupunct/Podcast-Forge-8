@@ -197,6 +197,7 @@ void EngineController::threadMain()
             PF8_LOG_ERROR("control", "job threw: %s", e.what());
         }
         engine_.collectGarbage();
+        engine_.soundboard().collectGarbage();
         {
             std::lock_guard lock(queueMutex_);
             busy_ = false;

@@ -188,3 +188,19 @@
 **Verified**
 - +12 dB of overload into a headphone feed comes out at exactly the −6 dBFS ceiling (limited, not
   muted); the monitor ceiling holds. 84 tests, 44 UI screens.
+
+## Stage 8 — Soundboard (2026-10-01)
+
+**Added**
+- `src/media`: `Soundboard` (24 carts; immutable pre-decoded buffers handed to the audio thread through
+  atomics, freed only after the audio thread lets go; play/retrigger, 5 ms click-free stop, fade-out
+  over the cart's time, fade-in, volume, loop) and `loadAudioFile` (WAV / MP3 / FLAC via JUCE,
+  mono → stereo, rate conversion with the engine's resampler, 10-minute cart limit).
+- `VarResampler` moved from `engine` to `dsp` (now shared by the engine and the file loader).
+- Engine renders the soundboard into the routing source Carts (Main, headphones; recorded via Main).
+- SOUNDBOARD dock tab: 24 pads (name, colour, remaining time, progress, loop, hotkey label), click /
+  Shift-click fade / Ctrl-click stop, right-click settings, background loading, STOP ALL, FADE ALL.
+
+**Verified**
+- 89 tests incl. envelopes, retrigger/loop, 24 simultaneous carts with zero RT allocations, buffer
+  lifetime across swaps, WAV 44.1k mono and FLAC decoding; 51 UI screens.

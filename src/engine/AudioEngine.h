@@ -20,6 +20,7 @@
 #include "dsp/DspParams.h"
 #include "dsp/Dynamics.h"
 #include "dsp/Reverb.h"
+#include "media/Soundboard.h"
 #include "record/RecordTap.h"
 #include "routing/RoutingEngine.h"
 
@@ -93,6 +94,7 @@ public:
 
     // Recording hand-off (the recorder configures and activates it).
     RecordTap& recordTap() noexcept { return recordTap_; }
+    Soundboard& soundboard() noexcept { return soundboard_; }
 
     void tick(int numFrames) noexcept override;
     void setTickTimeNs(int64_t t) noexcept override { tickTimeNs_ = t; }
@@ -139,6 +141,8 @@ private:
     std::array<dsp::Limiter, kNumChannels> hpLimiters_; // hearing protection per headphone feed
     dsp::Limiter monitorLimiter_;
     RecordTap recordTap_;
+    Soundboard soundboard_{48000};
+    std::vector<float> cartsL_, cartsR_;
     // Isolated tracks are delayed by the master limiter's look-ahead so they align with Main.
     std::vector<float> recordDelay_;  // [channel][L]
     int recordDelayPos_ = 0;

@@ -33,6 +33,11 @@ AudioEngine::AudioEngine(int sampleRate, int blockFrames)
     fxR_.assign(kMaxBlock, 0.0f);
     routingIn_.fxL = fxL_.data();
     routingIn_.fxR = fxR_.data();
+    soundboard_.setSampleRate(sampleRate_);
+    cartsL_.assign(kMaxBlock, 0.0f);
+    cartsR_.assign(kMaxBlock, 0.0f);
+    routingIn_.cartsL = cartsL_.data();
+    routingIn_.cartsR = cartsR_.data();
     mainLimiter_.prepare(sampleRate_, 2, kMaxBlock);
     cleanLimiter_.prepare(sampleRate_, 2, kMaxBlock);
     for (auto& l : hpLimiters_) l.prepare(sampleRate_, 2, kMaxBlock, 0.5, 80.0);
@@ -209,6 +214,9 @@ void AudioEngine::processBlock(int frames, int64_t nowNs) noexcept
     }
 
     if (EngineTap* tap = tap_.load(std::memory_order_acquire)) tap->onChannelBlock(channelPtrs_.data(), kNumChannels, frames);
+
+    // 2b. Soundboard → Carts source.
+    soundboard_.render(cartsL_.data(), cartsR_.data(), frames);
 
     // 3. Routing: channels (post-DSP) → Main, Clean, Music, HP 1–8, PFL, Monitor. The reverb
     //    return used here was computed from the previous block's sends (one block later — inaudible).
