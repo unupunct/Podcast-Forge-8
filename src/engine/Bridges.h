@@ -68,7 +68,14 @@ class BridgeCounters
 {
 public:
     BridgeStats read() const noexcept;
+    // Set by the tick when it applies a graph that contains this bridge. A master that is not yet
+    // attached drives the engine at its nominal rate only: its ring is not being served, so the
+    // "tick until full" feedback would otherwise race the engine ahead of real time.
+    void setAttached(bool on) noexcept { attached_.store(on, std::memory_order_release); }
+    bool attached() const noexcept { return attached_.load(std::memory_order_acquire); }
 protected:
+    std::atomic<bool> attached_{false};
+    double tickDebt_ = 0.0; // master device thread: engine blocks owed while not attached
     std::atomic<uint64_t> underruns_{0}, overruns_{0}, dropped_{0};
     std::atomic<double> ppm_{0.0}, fill_{0.0};
     std::atomic<SyncStatus> status_{SyncStatus::Priming};
@@ -117,6 +124,7 @@ private:
     int fadeLength_ = 0;
     int silenceFrames_ = 0; // re-centre deficit: frames of silence still to emit
     TimeDll dll_;           // device timeline (and the engine's time base when master)
+    int lastWriteFrames_ = 0; // device thread: frames of the last deviceWrite (nominal driving)
 };
 
 class OutputBridge : public BridgeCounters

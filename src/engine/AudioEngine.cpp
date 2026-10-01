@@ -87,9 +87,17 @@ bool AudioEngine::setPrerollSeconds(double seconds)
 
 void AudioEngine::setGraph(std::unique_ptr<EngineGraph> graph)
 {
+    // One "latest" slot: a newer graph replaces one the tick has not taken yet, so publishing never
+    // waits for the tick (it may be stalled — that is exactly when the watchdog republishes).
     EngineGraph* raw = graph.get();
     owned_.push_back(std::move(graph));
-    while (!pending_.tryPush(raw)) collectGarbage(); // queue is large; only full if the tick is stalled
+    if (EngineGraph* superseded = pendingGraph_.exchange(raw, std::memory_order_acq_rel))
+    {
+        // The tick never saw it: free it here.
+        auto it = std::find_if(owned_.begin(), owned_.end(), [superseded](const auto& p) { return p.get() == superseded; });
+        if (it != owned_.end()) owned_.erase(it);
+    }
+    collectGarbage();
 }
 
 int AudioEngine::collectGarbage()
@@ -113,12 +121,14 @@ void AudioEngine::startInternalClock()
     if (internal_ && internal_->running()) return;
     internal_ = std::make_unique<InternalClock>(this, sampleRate_, blockFrames_);
     internal_->start();
+    internalRunning_.store(true, std::memory_order_release);
     PF8_LOG_INFO("engine", "internal clock started rate=%d block=%d", sampleRate_, blockFrames_);
 }
 
 void AudioEngine::stopInternalClock()
 {
     if (!internal_) return;
+    internalRunning_.store(false, std::memory_order_release);
     internal_->stop();
     internal_.reset();
     PF8_LOG_INFO("engine", "internal clock stopped");
@@ -126,16 +136,14 @@ void AudioEngine::stopInternalClock()
 
 void AudioEngine::applyPendingGraph() noexcept
 {
-    EngineGraph* next = nullptr;
-    EngineGraph* latest = nullptr;
-    while (pending_.tryPop(next))
-    {
-        if (latest) retired_.push(&latest, 1); // superseded before it ever ran
-        latest = next;
-    }
+    EngineGraph* latest = pendingGraph_.exchange(nullptr, std::memory_order_acq_rel);
     if (!latest) return;
     if (graph_) retired_.push(&graph_, 1);
     graph_ = latest;
+    for (const auto& in : graph_->inputs)
+        if (in) in->setAttached(true);
+    for (const auto& out : graph_->outputs)
+        if (out) out->setAttached(true);
     activeGeneration_.store(graph_->generation, std::memory_order_release);
     meters_.graphGeneration = graph_->generation;
 }

@@ -657,6 +657,14 @@ std::unique_ptr<EngineController::Endpoint> EngineController::openEndpoint(const
         return nullptr;
     }
 
+    if (e->stream->channels() < 1 || e->stream->channels() > EngineGraph::kMaxDeviceChannels)
+    {
+        std::lock_guard lock(stateMutex_);
+        failures_[key] = "device has " + std::to_string(e->stream->channels()) + " channels; at most " +
+                         std::to_string(EngineGraph::kMaxDeviceChannels) + " are supported";
+        PF8_LOG_WARN("device", "open refused key=%s: %d channels", key.c_str(), e->stream->channels());
+        return nullptr;
+    }
     BridgeConfig bc;
     bc.deviceChannels = e->stream->channels();
     bc.deviceRate = e->stream->sampleRate();
@@ -879,10 +887,24 @@ void EngineController::reconcile()
         }
         if (open) continue;
         const auto& n = needed[key];
-        if (auto e = openEndpoint(n.id, n.flow, key == masterKey, n.pairs))
+        const bool isMaster = key == masterKey;
+        // Never two clocks at once: the internal clock stops before a new master starts (a short
+        // pause of the tick while the device opens; the watchdog treats it as grace).
+        if (isMaster) engine_.stopInternalClock();
+        if (auto e = openEndpoint(n.id, n.flow, isMaster, n.pairs))
         {
-            std::lock_guard lock(stateMutex_);
-            endpoints_[key] = std::move(e);
+            {
+                std::lock_guard lock(stateMutex_);
+                endpoints_[key] = std::move(e);
+            }
+            // The master joins the graph at once, so it can serve its own ring while the other
+            // devices are still opening.
+            if (isMaster) publishGraph();
+        }
+        else if (isMaster)
+        {
+            masterBurst_ = settings_.blockFrames;
+            engine_.startInternalClock();
         }
     }
 

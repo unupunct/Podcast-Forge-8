@@ -87,7 +87,10 @@ private:
 
     mutable std::mutex ownersMutex_;
     std::array<std::shared_ptr<const CartBuffer>, kCartCount> owners_;
-    std::vector<std::shared_ptr<const CartBuffer>> retired_;
+    // A retired buffer is freed only after a render that started after its retirement has finished
+    // (renders_ counts completed renders) and no voice still publishes it as playing.
+    std::vector<std::pair<std::shared_ptr<const CartBuffer>, uint64_t>> retired_;
+    std::atomic<uint64_t> renders_{0};
 };
 
 } // namespace pf8

@@ -15,7 +15,7 @@ void Soundboard::setBuffer(int cart, std::shared_ptr<const CartBuffer> b)
     if (cart < 0 || cart >= kCartCount) return;
     std::lock_guard lock(ownersMutex_);
     auto& owner = owners_[static_cast<size_t>(cart)];
-    if (owner) retired_.push_back(owner); // freed once the audio thread no longer plays it
+    if (owner) retired_.emplace_back(owner, renders_.load(std::memory_order_acquire)); // freed once the audio thread let go
     owner = std::move(b);
     active_[static_cast<size_t>(cart)].store(owner && owner->error.empty() ? owner.get() : nullptr, std::memory_order_release);
     state_[static_cast<size_t>(cart)].length.store(owner ? owner->frames : 0);
@@ -45,8 +45,13 @@ void Soundboard::fadeAll() noexcept
 void Soundboard::collectGarbage()
 {
     std::lock_guard lock(ownersMutex_);
+    const uint64_t done = renders_.load(std::memory_order_acquire);
     retired_.erase(std::remove_if(retired_.begin(), retired_.end(),
-                                  [this](const std::shared_ptr<const CartBuffer>& b) {
+                                  [this, done](const auto& entry) {
+                                      const auto& b = entry.first;
+                                      // A render may have picked the buffer up just before it was
+                                      // retired: wait until that render has completed.
+                                      if (done < entry.second + 2) return false;
                                       for (auto& p : playing_)
                                           if (p.load(std::memory_order_acquire) == b.get()) return false;
                                       for (auto& a : active_)
@@ -149,6 +154,7 @@ void Soundboard::render(float* left, float* right, int frames) noexcept
         state_[c].playing.store(v.active, std::memory_order_relaxed);
         state_[c].position.store(v.pos, std::memory_order_relaxed);
     }
+    renders_.fetch_add(1, std::memory_order_release);
 }
 
 } // namespace pf8

@@ -111,6 +111,7 @@ struct Driver : TickClient
 TEST_CASE("Master OutputBridge ticks on demand and adds at most one block of latency", "[engine][bridges]")
 {
     OutputBridge b(cfg(true, 2, 480));
+    b.setAttached(true); // what the engine does when it applies a graph containing the bridge
     Driver d;
     d.bridge = &b;
     std::vector<float> dev(480 * 2);
@@ -123,4 +124,34 @@ TEST_CASE("Master OutputBridge ticks on demand and adds at most one block of lat
     CHECK(dev[0] == Catch::Approx(0.3f));
     CHECK(dev[1] == Catch::Approx(-0.3f));
     CHECK(d.ticks >= 100 * 480 / 128);
+}
+
+namespace {
+struct CountingClient : TickClient
+{
+    int ticks = 0;
+    void tick(int) noexcept override { ++ticks; } // does not serve the bridge (not in the graph)
+};
+} // namespace
+
+TEST_CASE("A master not yet in the engine graph drives the engine at its nominal rate only", "[engine][bridges]")
+{
+    // Regression: the "tick until the ring has a period" loop raced the engine ahead of real time
+    // (about 3x for outputs, up to 64 ticks per callback for inputs) while the master's bridge was
+    // not yet part of the published graph — e.g. during a watchdog restart in a recording.
+    OutputBridge out(cfg(true, 2, 480));
+    CountingClient c;
+    std::vector<float> dev(480 * 2);
+    for (int k = 0; k < 1000; ++k) out.deviceRead(dev.data(), 480, 0, &c);
+    CHECK(std::abs(c.ticks - 1000 * 480 / 128) <= 1); // 3750 ticks for 480 000 frames
+
+    InputBridge in(cfg(true, 1, 480));
+    CountingClient ci;
+    std::vector<float> cap(480, 0.1f);
+    for (int k = 0; k < 1000; ++k)
+    {
+        in.deviceWrite(cap.data(), 480, static_cast<int64_t>(k) * 10'000'000);
+        in.driveEngine(ci);
+    }
+    CHECK(std::abs(ci.ticks - 1000 * 480 / 128) <= 1);
 }

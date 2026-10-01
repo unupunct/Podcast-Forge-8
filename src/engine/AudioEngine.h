@@ -80,7 +80,8 @@ public:
 
     void startInternalClock();
     void stopInternalClock();
-    bool internalClockRunning() const noexcept { return internal_ && internal_->running(); }
+    // Any thread (the clock object itself is owned by the control thread).
+    bool internalClockRunning() const noexcept { return internalRunning_.load(std::memory_order_acquire); }
 
     EngineMeters meters() const noexcept { return meterSnapshot_.read(); }
     void setTap(EngineTap* tap) noexcept { tap_.store(tap, std::memory_order_release); }
@@ -127,7 +128,7 @@ private:
     void* clockCtx_ = nullptr;
 
     std::atomic_flag ticking_ = ATOMIC_FLAG_INIT;
-    MpscQueue<EngineGraph*> pending_{64};
+    std::atomic<EngineGraph*> pendingGraph_{nullptr}; // newest published graph not yet taken by the tick
     SpscRing<EngineGraph*> retired_{128};
     EngineGraph* graph_ = nullptr; // tick thread
     std::atomic<uint64_t> activeGeneration_{0};
@@ -138,7 +139,8 @@ private:
     std::vector<float*> bridgePtrs_;   // [bridge][deviceChannel]
     std::vector<float> channelBuffers_; // [channel][kMaxBlock]
 
-    std::unique_ptr<InternalClock> internal_;
+    std::unique_ptr<InternalClock> internal_; // control thread only
+    std::atomic<bool> internalRunning_{false};
     SeqLockSnapshot<EngineMeters> meterSnapshot_;
     EngineMeters meters_{}; // tick thread
     double peakAccum_ = 0.0;

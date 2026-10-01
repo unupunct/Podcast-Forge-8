@@ -70,8 +70,10 @@ InputBridge::InputBridge(const BridgeConfig& config)
 
 void InputBridge::deviceWrite(const float* interleaved, int frames, int64_t callbackNs) noexcept
 {
-    const size_t samples = static_cast<size_t>(frames) * static_cast<size_t>(cfg_.deviceChannels);
-    const size_t written = ring_.push(interleaved, samples);
+    const size_t ch = static_cast<size_t>(cfg_.deviceChannels);
+    const size_t samples = static_cast<size_t>(frames) * ch;
+    // Whole frames only: a partial frame would shift every later frame to the wrong channels.
+    const size_t written = ring_.push(interleaved, std::min(samples, ring_.freeSpace() / ch * ch));
     if (written < samples)
     {
         overruns_.fetch_add(1, std::memory_order_relaxed);
@@ -81,12 +83,27 @@ void InputBridge::deviceWrite(const float* interleaved, int frames, int64_t call
     // The filtered callback time stands for "the device has produced everything delivered so far".
     lastEndNs_.store(dll_.update(callbackNs, frames), std::memory_order_release);
     deviceFrames_.fetch_add(static_cast<uint64_t>(frames), std::memory_order_relaxed);
+    lastWriteFrames_ = frames;
 }
 
 void InputBridge::driveEngine(TickClient& engine, int64_t) noexcept
 {
     // deviceWrite() just updated this device's DLL: that filtered time is the engine's "now".
     const int64_t engineNow = lastEndNs_.load(std::memory_order_acquire);
+    if (!attached())
+    {
+        // Not in the engine's graph yet: tick at the nominal rate (the ring is not being read).
+        tickDebt_ += static_cast<double>(lastWriteFrames_) * cfg_.engineRate / cfg_.deviceRate / cfg_.engineBlock;
+        lastWriteFrames_ = 0;
+        for (int guard = 0; guard < 64 && tickDebt_ >= 1.0; ++guard)
+        {
+            if (engineNow != 0) engine.setTickTimeNs(engineNow);
+            engine.tick(cfg_.engineBlock);
+            tickDebt_ -= 1.0;
+        }
+        return;
+    }
+    lastWriteFrames_ = 0;
     // Only valid for a master bridge: the engine side runs on this (device) thread.
     for (int guard = 0; guard < 64; ++guard)
     {
@@ -302,7 +319,9 @@ void OutputBridge::engineCommit(int frames, int64_t nowNs) noexcept
         skipFrames_ -= static_cast<int64_t>(offsetFrames);
     }
     const size_t samples = (static_cast<size_t>(produced) - offsetFrames) * devCh;
-    const size_t written = ring_.push(deviceFrames_.data() + offsetFrames * devCh, samples);
+    // Whole frames only (a partial frame would rotate the channels from then on).
+    const size_t room = ring_.freeSpace() / static_cast<size_t>(devCh) * static_cast<size_t>(devCh);
+    const size_t written = ring_.push(deviceFrames_.data() + offsetFrames * devCh, std::min(samples, room));
     totalWritten_ += written / static_cast<size_t>(devCh);
     if (written < samples)
     {
@@ -342,7 +361,9 @@ void OutputBridge::engineCommit(int frames, int64_t nowNs) noexcept
                     size_t left = n;
                     while (left > 0)
                     {
-                        const size_t c = std::min(left, deviceFrames_.size());
+                        const size_t whole = ring_.freeSpace() / static_cast<size_t>(devCh) * static_cast<size_t>(devCh);
+                        const size_t c = std::min({left, deviceFrames_.size() / static_cast<size_t>(devCh) * static_cast<size_t>(devCh), whole});
+                        if (c == 0) break;
                         const size_t w = ring_.push(deviceFrames_.data(), c);
                         totalWritten_ += w / static_cast<size_t>(devCh);
                         if (w < c) break;
@@ -375,11 +396,25 @@ void OutputBridge::deviceRead(float* interleaved, int frames, int64_t nowNs, Tic
         // callback scheduling jitter while following the master's true rate.
         const int64_t engineNow = deviceNow;
         clockOffsetUs_.store(static_cast<double>(engineNow - nowNs) * 1e-3, std::memory_order_relaxed);
-        const int maxTicks = frames / std::max(1, deviceFramesFor(cfg_.engineBlock, cfg_)) + 8;
-        for (int t = 0; t < maxTicks && static_cast<int>(readableDeviceFrames()) < frames; ++t)
+        if (!attached())
         {
-            driver->setTickTimeNs(engineNow);
-            driver->tick(cfg_.engineBlock);
+            // Not in the engine's graph yet: tick at the nominal rate (this ring is not filled).
+            tickDebt_ += static_cast<double>(frames) * cfg_.engineRate / cfg_.deviceRate / cfg_.engineBlock;
+            for (int guard = 0; guard < 64 && tickDebt_ >= 1.0; ++guard)
+            {
+                driver->setTickTimeNs(engineNow);
+                driver->tick(cfg_.engineBlock);
+                tickDebt_ -= 1.0;
+            }
+        }
+        else
+        {
+            const int maxTicks = frames / std::max(1, deviceFramesFor(cfg_.engineBlock, cfg_)) + 8;
+            for (int t = 0; t < maxTicks && static_cast<int>(readableDeviceFrames()) < frames; ++t)
+            {
+                driver->setTickTimeNs(engineNow);
+                driver->tick(cfg_.engineBlock);
+            }
         }
     }
 
