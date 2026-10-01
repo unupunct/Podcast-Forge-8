@@ -13,7 +13,11 @@
 #include "core/SettingsDb.h"
 #include "devices/HotplugWatcher.h"
 #include "devices/WinEndpointEnumerator.h"
+#include "core/Json.h"
 #include "engine/MasterClock.h"
+
+#include <cstdio>
+#include <fstream>
 
 namespace pf8 {
 
@@ -123,6 +127,8 @@ bool EngineController::startRecording(std::string& error)
 
 EngineController::~EngineController()
 {
+    watchdogQuit_ = true;
+    if (watchdog_.joinable()) watchdog_.join();
     // Finalise any recording first: files must always end valid.
     if (recorder_) recorder_->stop();
     post([this] {
@@ -211,6 +217,7 @@ void EngineController::threadMain()
 
 void EngineController::start()
 {
+    if (!watchdog_.joinable()) watchdog_ = std::thread([this] { watchdogMain(); });
     post([this] {
         loadAssignments();
         hotplug_ = std::make_unique<HotplugWatcher>([this] { onHotplug(); });
@@ -218,6 +225,217 @@ void EngineController::start()
         PF8_LOG_INFO("device", "initial scan: %zu endpoints", registry_.devices().size());
         reconcile();
     });
+}
+
+namespace {
+std::string utcNow(bool forFile = false)
+{
+    SYSTEMTIME st;
+    GetSystemTime(&st);
+    char buf[40];
+    if (forFile)
+        std::snprintf(buf, sizeof buf, "%04u%02u%02u-%02u%02u%02u", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    else
+        std::snprintf(buf, sizeof buf, "%04u-%02u-%02uT%02u:%02u:%02u.%03uZ", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
+                      st.wMilliseconds);
+    return buf;
+}
+} // namespace
+
+void EngineController::noteGlitch(GlitchEvent e)
+{
+    std::lock_guard lock(glitchMutex_);
+    glitches_.push_back(std::move(e));
+    while (glitches_.size() > 500) glitches_.pop_front();
+}
+
+std::vector<GlitchEvent> EngineController::glitches() const
+{
+    std::lock_guard lock(glitchMutex_);
+    return {glitches_.begin(), glitches_.end()};
+}
+
+void EngineController::restartAudio()
+{
+    post([this] {
+        PF8_LOG_WARN("engine", "audio restart: closing every stream");
+        std::map<std::string, std::unique_ptr<Endpoint>> closing;
+        {
+            std::lock_guard lock(stateMutex_);
+            closing.swap(endpoints_);
+            masterKey_.clear();
+        }
+        engine_.setGraph(std::make_unique<EngineGraph>());
+        for (auto& [k, e] : closing)
+            if (e->stream) e->stream->stop();
+        closing.clear();
+        engine_.stopInternalClock();
+        reconcile(); // reopens everything from the assignments, starts the internal clock if needed
+        std::lock_guard lock(stateMutex_);
+        PF8_LOG_INFO("engine", "audio restart: done, %zu streams", endpoints_.size());
+    });
+}
+
+void EngineController::watchdogMain()
+{
+    TickWatchdog wd;
+    int n = 0;
+    while (!watchdogQuit_.load())
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        bool busy;
+        {
+            std::lock_guard lock(queueMutex_);
+            busy = busy_;
+        }
+        const auto m = engine_.meters();
+        const int64_t now = monotonicNs() / 1000000;
+        const auto v = wd.update(m.ticks, now, busy);
+        if (v != TickWatchdog::Verdict::Ok)
+        {
+            stalls_ = wd.stalls();
+            GlitchEvent g;
+            g.utc = utcNow();
+            g.device = "engine";
+            g.kind = "tick-stall";
+            g.count = wd.stalls();
+            g.load = m.load;
+            noteGlitch(g);
+            PF8_LOG_ERROR("engine", "watchdog: no engine tick for %lld ms (stall %llu)%s", static_cast<long long>(wd.stalledForMs(now)),
+                          static_cast<unsigned long long>(wd.stalls()),
+                          v == TickWatchdog::Verdict::Stalled ? " - restarting audio" : " - restart limit reached");
+            writeDiagnosticsReport("tick-stall");
+            if (v == TickWatchdog::Verdict::Stalled)
+            {
+                restarts_ = wd.restarts();
+                g.kind = "restart";
+                noteGlitch(g);
+                restartAudio();
+            }
+        }
+        if (++n % 3 != 0) continue; // xrun scan every 300 ms
+        const auto s = status();
+        auto scan = [&](const EndpointView& ev, const char* role) {
+            if (ev.state != EndpointState::Ok) return;
+            const std::string key = std::string(role) + ev.endpointId;
+            const bool known = lastXruns_.count(key) > 0;
+            auto& last = lastXruns_[key];
+            const auto& b = ev.bridge;
+            if (known && (b.underruns > last.first || b.overruns > last.second))
+            {
+                GlitchEvent g;
+                g.utc = utcNow();
+                g.device = ev.assignedName;
+                g.kind = b.underruns > last.first ? "underrun" : "overrun";
+                g.count = b.underruns > last.first ? b.underruns - last.first : b.overruns - last.second;
+                g.fill = b.fill;
+                g.target = b.target;
+                g.ppm = b.ppm;
+                g.load = m.load;
+                noteGlitch(g);
+            }
+            last = {b.underruns, b.overruns};
+        };
+        for (const auto& c : s.channels)
+        {
+            scan(c.mic, "in:");
+            scan(c.headphones, "out:");
+        }
+        for (const auto& o : s.outputs) scan(o, "out:");
+        scan(s.talkback, "in:");
+    }
+}
+
+std::string EngineController::diagnosticsReport() const
+{
+    const auto s = status();
+    const auto m = meters();
+    json::Object root;
+    root["format"] = "PodcastForge8.Diagnostics";
+    root["createdUtc"] = utcNow();
+    json::Object eng;
+    eng["sampleRate"] = s.sampleRate;
+    eng["blockFrames"] = s.blockFrames;
+    eng["internalClock"] = s.internalClock;
+    eng["master"] = s.masterName;
+    eng["masterPeriod"] = s.masterPeriod;
+    eng["openStreams"] = s.openStreams;
+    eng["load"] = m.load;
+    eng["loadPeak"] = m.loadPeak;
+    eng["ticks"] = m.ticks;
+    eng["skippedTicks"] = m.skippedTicks;
+    eng["watchdogStalls"] = stalls_.load();
+    eng["watchdogRestarts"] = restarts_.load();
+    root["engine"] = json::Value(std::move(eng));
+    json::Array eps;
+    auto add = [&](const EndpointView& v, const std::string& role) {
+        if (v.state == EndpointState::None) return;
+        json::Object o;
+        o["role"] = role;
+        o["device"] = v.assignedName;
+        o["state"] = toString(v.state);
+        o["master"] = v.master;
+        o["rate"] = v.deviceRate;
+        o["channels"] = v.deviceChannels;
+        o["period"] = v.periodFrames;
+        o["sync"] = toString(v.bridge.status);
+        o["ppm"] = v.bridge.ppm;
+        o["fill"] = v.bridge.fill;
+        o["target"] = v.bridge.target;
+        o["underruns"] = v.bridge.underruns;
+        o["overruns"] = v.bridge.overruns;
+        o["droppedFrames"] = v.bridge.droppedFrames;
+        if (!v.detail.empty()) o["detail"] = v.detail;
+        eps.emplace_back(std::move(o));
+    };
+    for (size_t i = 0; i < s.channels.size(); ++i)
+    {
+        add(s.channels[i].mic, "CH" + std::to_string(i + 1) + " mic");
+        add(s.channels[i].headphones, "CH" + std::to_string(i + 1) + " headphones");
+    }
+    static const char* roles[kOutputRoles] = {"Monitor", "Stream Main", "Stream Clean", "Stream Music"};
+    for (size_t r = 0; r < s.outputs.size(); ++r) add(s.outputs[r], roles[r]);
+    add(s.talkback, "Talkback mic");
+    root["endpoints"] = std::move(eps);
+    const auto rs = recorder_->status();
+    json::Object rec;
+    rec["state"] = toString(rs.state);
+    rec["seconds"] = rs.seconds;
+    rec["droppedFrames"] = rs.droppedFrames;
+    rec["writeError"] = rs.writeError;
+    rec["writeBytesPerSecond"] = rs.writeBytesPerSecond;
+    rec["freeBytes"] = rs.disk.freeBytes;
+    root["recorder"] = json::Value(std::move(rec));
+    json::Array gl;
+    for (const auto& g : glitches())
+    {
+        json::Object o;
+        o["utc"] = g.utc;
+        o["device"] = g.device;
+        o["kind"] = g.kind;
+        o["count"] = g.count;
+        o["fill"] = g.fill;
+        o["target"] = g.target;
+        o["ppm"] = g.ppm;
+        o["load"] = g.load;
+        gl.emplace_back(std::move(o));
+    }
+    root["glitches"] = std::move(gl);
+    return json::serialize(json::Value(std::move(root)), true);
+}
+
+std::optional<std::filesystem::path> EngineController::writeDiagnosticsReport(const std::string& reason, std::filesystem::path dir) const
+{
+    if (dir.empty()) dir = paths::diagnostics();
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    const auto file = dir / paths::fromUtf8("diagnostics-" + utcNow(true) + "-" + reason + ".json");
+    std::ofstream out(file, std::ios::binary);
+    if (!out) return std::nullopt;
+    out << diagnosticsReport();
+    if (!out) return std::nullopt;
+    PF8_LOG_INFO("diag", "diagnostics report written (%s)", reason.c_str());
+    return file;
 }
 
 void EngineController::rescanDevices()

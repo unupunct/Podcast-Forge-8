@@ -219,7 +219,20 @@ void AudioEngine::processBlock(int frames, int64_t nowNs) noexcept
     for (int ch = 0; ch < kNumChannels; ++ch)
     {
         float* dst = channelBuffers_.data() + static_cast<size_t>(ch) * kMaxBlock;
-        readRoute(g, nIn, g ? &g->channels[static_cast<size_t>(ch)] : nullptr, dst, frames);
+        const ChannelRoute* route = g ? &g->channels[static_cast<size_t>(ch)] : nullptr;
+        readRoute(g, nIn, route, dst, frames);
+        if (const float hz = simHz_[static_cast<size_t>(ch)].get(); hz > 0.0f && (!route || route->inputBridge < 0))
+        {
+            const float level = simLevel_[static_cast<size_t>(ch)].get();
+            double& ph = simPhase_[static_cast<size_t>(ch)];
+            const double step = 2.0 * 3.14159265358979323846 * hz / sampleRate_;
+            for (int i = 0; i < frames; ++i)
+            {
+                dst[i] = level * static_cast<float>(std::sin(ph));
+                ph += step;
+            }
+            ph = std::fmod(ph, 2.0 * 3.14159265358979323846);
+        }
 
         // Mic wizard tap: raw input, before trim and processing.
         if (analysisChannel_.load(std::memory_order_relaxed) == ch)

@@ -105,6 +105,13 @@ public:
     Soundboard& soundboard() noexcept { return soundboard_; }
     MusicPlayer& music() noexcept { return *music_; }
     dsp::DuckerParams& ducker() noexcept { return duckerParams_; }
+    // Simulated source on a channel without a device (end-to-end test, --e2e): a sine at `hz`
+    // (0 = off) and `level` (linear). Ignored while the channel has a real input.
+    void setSimulatedSource(int channel, float hz, float level) noexcept
+    {
+        simLevel_[static_cast<size_t>(channel)].set(level);
+        simHz_[static_cast<size_t>(channel)].set(hz);
+    }
 
     void tick(int numFrames) noexcept override;
     void setTickTimeNs(int64_t t) noexcept override { tickTimeNs_ = t; }
@@ -168,6 +175,8 @@ private:
     std::vector<float> recordMain_;   // interleaved stereo
     std::vector<float> busBuffers_; // [bus][L/R][kMaxBlock]
     std::vector<float> talkback_;   // mono talkback mic
+    std::array<AtomicParam, kNumChannels> simHz_, simLevel_; // 0 = off
+    std::array<double, kNumChannels> simPhase_{};
     RoutingInputs routingIn_{};
     RoutingOutputs routingOut_{};
     std::array<const float*, kNumChannels> channelPtrs_{};

@@ -22,6 +22,7 @@
 #include "devices/DeviceRegistry.h"
 #include "engine/AudioEngine.h"
 #include "engine/WasapiStream.h"
+#include "engine/Watchdog.h"
 #include "record/Recorder.h"
 #include "routing/TalkbackKey.h"
 
@@ -71,6 +72,16 @@ struct ControllerStatus
     int talkbackChannel = -1;
 };
 
+// An xrun / glitch seen on a stream (AUDIO_ENGINE.md §6), for the Diagnostics page and reports.
+struct GlitchEvent
+{
+    std::string utc;
+    std::string device;
+    std::string kind; // "underrun", "overrun", "tick-stall", "restart"
+    uint64_t count = 0;
+    double fill = 0.0, target = 0.0, ppm = 0.0, load = 0.0;
+};
+
 class EngineController
 {
 public:
@@ -118,6 +129,16 @@ public:
     bool startRecording(std::string& error);
     Recorder& recorder() noexcept { return *recorder_; }
     ControllerStatus status() const;
+    // Diagnostics (any thread).
+    std::vector<GlitchEvent> glitches() const;
+    uint64_t watchdogStalls() const noexcept { return stalls_.load(); }
+    uint64_t watchdogRestarts() const noexcept { return restarts_.load(); }
+    std::string diagnosticsReport() const; // JSON
+    // Writes the report to `dir` (default %LOCALAPPDATA%\PodcastForge8\Diagnostics). Returns the file.
+    std::optional<std::filesystem::path> writeDiagnosticsReport(const std::string& reason, std::filesystem::path dir = {}) const;
+    // Closes every stream and reopens it from the assignments (also what the watchdog does).
+    void restartAudio();
+
     // Talkback key (UI thread: the TALK button and hotkeys). Drives RoutingParams::talkbackActive.
     void talkbackPress();
     void talkbackRelease();
@@ -160,8 +181,17 @@ private:
     uint64_t generation_ = 0;
     std::atomic<int> hotplugPending_{0};
 
+    void watchdogMain();
+    void noteGlitch(GlitchEvent e);
+    std::thread watchdog_;
+    std::atomic<bool> watchdogQuit_{false};
+    std::atomic<uint64_t> stalls_{0}, restarts_{0};
+    mutable std::mutex glitchMutex_;
+    std::deque<GlitchEvent> glitches_;
+    std::map<std::string, std::pair<uint64_t, uint64_t>> lastXruns_; // watchdog thread: key -> underruns, overruns
+
     std::thread thread_;
-    std::mutex queueMutex_;
+    mutable std::mutex queueMutex_;
     std::condition_variable cv_;
     std::condition_variable idleCv_;
     std::multimap<std::chrono::steady_clock::time_point, std::function<void()>> jobs_;
