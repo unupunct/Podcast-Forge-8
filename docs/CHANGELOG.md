@@ -204,3 +204,22 @@
 **Verified**
 - 89 tests incl. envelopes, retrigger/loop, 24 simultaneous carts with zero RT allocations, buffer
   lifetime across swaps, WAV 44.1k mono and FLAC decoding; 51 UI screens.
+
+## Stage 9 — Music and auto-ducking (2026-10-01)
+
+**Added**
+- `src/media/MusicPlayer`: playlist streamed from disk by a decoder thread into a lock-free ring
+  (4 s); play / pause / resume / next / fade-out / stop, 50 ms fade-in, 20 ms pause ramp, auto-advance,
+  rate conversion with the shared resampler, flush handshake on track change, underrun counter that
+  ignores the expected gap while a track opens.
+- `dsp::Ducker`: RMS sidechain on the previous block's post-fader voice sum; threshold, depth, attack
+  (must stay above threshold for the whole attack — no pumping on clicks), hold and gentle release.
+- Engine renders music into the Music routing source with the duck gain; `musicDuckDb` meter;
+  optional separate Music record track (`Recording settings → recordMusic`).
+- MUSIC dock tab: playlist (double-click to play, durations, unreadable files flagged), transport,
+  volume, AUTO NEXT, REC TRACK, DUCKING with threshold / depth / release and a live duck meter.
+
+**Verified**
+- 92 tests incl. ducking timing (attack, hold, release, off), zero RT allocations, playlist streaming
+  across 48k / 44.1k files with pitch kept, pause silence, auto-advance without underruns, fade-out;
+  58 UI screens.

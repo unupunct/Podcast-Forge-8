@@ -34,6 +34,15 @@ AudioEngine::AudioEngine(int sampleRate, int blockFrames)
     routingIn_.fxL = fxL_.data();
     routingIn_.fxR = fxR_.data();
     soundboard_.setSampleRate(sampleRate_);
+    music_ = std::make_unique<MusicPlayer>(sampleRate_);
+    ducker_.prepare(sampleRate_);
+    musicL_.assign(kMaxBlock, 0.0f);
+    musicR_.assign(kMaxBlock, 0.0f);
+    duckGain_.assign(kMaxBlock, 1.0f);
+    voice_.assign(kMaxBlock, 0.0f);
+    recordMusic_.assign(2 * kMaxBlock, 0.0f);
+    routingIn_.musicL = musicL_.data();
+    routingIn_.musicR = musicR_.data();
     cartsL_.assign(kMaxBlock, 0.0f);
     cartsR_.assign(kMaxBlock, 0.0f);
     routingIn_.cartsL = cartsL_.data();
@@ -218,6 +227,22 @@ void AudioEngine::processBlock(int frames, int64_t nowNs) noexcept
     // 2b. Soundboard → Carts source.
     soundboard_.render(cartsL_.data(), cartsR_.data(), frames);
 
+    // 2c. Music, ducked under the voices on Main (sidechain: last block's post-fader voices).
+    {
+        std::fill(voice_.begin(), voice_.begin() + frames, 0.0f);
+        const auto& rp = routing_.params();
+        const int n = std::min(frames, prevFrames_);
+        for (int ch = 0; ch < kNumChannels; ++ch)
+        {
+            if (rp.gain[static_cast<size_t>(ch)][idx(BusId::Main)].get() <= 0.0f) continue;
+            const float* post = routing_.postFader(ch);
+            for (int i = 0; i < n; ++i) voice_[static_cast<size_t>(i)] += post[i];
+        }
+        ducker_.process(voice_.data(), frames, duckerParams_, duckGain_.data());
+        music_->render(musicL_.data(), musicR_.data(), frames, duckGain_.data());
+        meters_.musicDuckDb = gainToDb(ducker_.gain());
+    }
+
     // 3. Routing: channels (post-DSP) → Main, Clean, Music, HP 1–8, PFL, Monitor. The reverb
     //    return used here was computed from the previous block's sends (one block later — inaudible).
     routing_.process(routingIn_, routingOut_, frames);
@@ -307,6 +332,12 @@ void AudioEngine::processBlock(int frames, int64_t nowNs) noexcept
             recordMain_[static_cast<size_t>(2 * i + 1)] = mr[i];
         }
         tracks[static_cast<size_t>(TrackId::Main)] = recordMain_.data();
+        for (int i = 0; i < frames; ++i)
+        {
+            recordMusic_[static_cast<size_t>(2 * i)] = musicL_[static_cast<size_t>(i)];
+            recordMusic_[static_cast<size_t>(2 * i + 1)] = musicR_[static_cast<size_t>(i)];
+        }
+        tracks[static_cast<size_t>(TrackId::Music)] = recordMusic_.data();
         recordTap_.push(tracks, frames);
     }
     else
@@ -338,6 +369,7 @@ void AudioEngine::processBlock(int frames, int64_t nowNs) noexcept
         }
         meters_.busPeak[b] = {pl, pr};
     }
+    prevFrames_ = frames;
     meters_.anySolo = routing_.anySolo();
     meters_.anyPfl = routing_.anyPfl();
 

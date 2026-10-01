@@ -105,6 +105,7 @@ Recorder::Settings EngineController::recorderSettings() const
     s.format = recordingSettings_.format;
     s.depth = recordingSettings_.depth;
     s.recordMain = recordingSettings_.recordMain;
+    s.recordMusic = recordingSettings_.recordMusic;
     const auto a = assignments();
     for (size_t i = 0; i < 8; ++i)
     {

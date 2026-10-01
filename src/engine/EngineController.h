@@ -107,6 +107,7 @@ public:
         FileFormat format = FileFormat::Wav;
         BitDepth depth = BitDepth::Int24;
         bool recordMain = true;
+        bool recordMusic = false;
     };
     RecordingSettings& recordingSettings() noexcept { return recordingSettings_; }
     Recorder::Settings recorderSettings() const; // assembled from assignments + arms + recording settings

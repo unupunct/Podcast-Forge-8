@@ -37,6 +37,7 @@ public:
         std::array<bool, 8> armed{true, true, true, true, true, true, true, true};
         std::array<std::string, 8> names{};
         bool recordMain = true;
+        bool recordMusic = false; // track 11: the (ducked) music channel
         std::string description;
         uint64_t rf64Threshold = WavWriter::kDefaultRf64Threshold; // test hook
         double ringSeconds = 2.0;

@@ -1,6 +1,7 @@
 add_library(pf8_media STATIC
     Soundboard.cpp
     AudioFileLoader.cpp
+    MusicPlayer.cpp
 )
 target_link_libraries(pf8_media PUBLIC pf8_core PRIVATE pf8_juce PUBLIC pf8_dsp)
 target_include_directories(pf8_media PUBLIC ${PROJECT_SOURCE_DIR}/src)

@@ -44,7 +44,7 @@ double Recorder::bytesPerSecond(const Settings& s) const
     int mono = 0;
     for (bool a : s.armed) mono += a ? 1 : 0;
     const int bps = s.format == FileFormat::Flac ? 2 : bytesPerSample(s.depth); // FLAC ~ half of 24-bit PCM
-    return DiskGuard::bytesPerSecond(mono, s.recordMain ? 1 : 0, rate_, bps);
+    return DiskGuard::bytesPerSecond(mono, (s.recordMain ? 1 : 0) + (s.recordMusic ? 1 : 0), rate_, bps);
 }
 
 std::filesystem::path Recorder::metadataDir() const
@@ -125,6 +125,17 @@ bool Recorder::start(const Settings& settings, std::string& error)
         const auto file = uniqueFilePath(*dir / "Mix", "MainMix", extension(settings.format));
         if (!openTrack(t, file, "Main Mix", error)) return false;
         mask |= 1u << static_cast<int>(TrackId::Main);
+        tracks.push_back(std::move(t));
+    }
+    if (settings.recordMusic)
+    {
+        Track t;
+        t.id = static_cast<int>(TrackId::Music);
+        t.channels = 2;
+        t.relativeTo = *dir;
+        const auto file = uniqueFilePath(*dir / "Audio", "Music", extension(settings.format));
+        if (!openTrack(t, file, "Music", error)) return false;
+        mask |= 1u << static_cast<int>(TrackId::Music);
         tracks.push_back(std::move(t));
     }
     if (tracks.empty())

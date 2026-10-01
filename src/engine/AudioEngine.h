@@ -20,6 +20,8 @@
 #include "dsp/DspParams.h"
 #include "dsp/Dynamics.h"
 #include "dsp/Reverb.h"
+#include "dsp/Ducker.h"
+#include "media/MusicPlayer.h"
 #include "media/Soundboard.h"
 #include "record/RecordTap.h"
 #include "routing/RoutingEngine.h"
@@ -40,6 +42,7 @@ struct EngineMeters
     std::array<dsp::StripMeters, kNumChannels> strip{};     // gate / comp / de-ess / limiter activity
     float masterLimiterGrDb = 0.0f;
     std::array<float, kNumChannels> hpProtectGrDb{}; // ≤ 0 when the protection limiter acts
+    float musicDuckDb = 0.0f;                         // ≤ 0 while ducking
     float monitorProtectGrDb = 0.0f;
 };
 
@@ -95,6 +98,8 @@ public:
     // Recording hand-off (the recorder configures and activates it).
     RecordTap& recordTap() noexcept { return recordTap_; }
     Soundboard& soundboard() noexcept { return soundboard_; }
+    MusicPlayer& music() noexcept { return *music_; }
+    dsp::DuckerParams& ducker() noexcept { return duckerParams_; }
 
     void tick(int numFrames) noexcept override;
     void setTickTimeNs(int64_t t) noexcept override { tickTimeNs_ = t; }
@@ -143,6 +148,11 @@ private:
     RecordTap recordTap_;
     Soundboard soundboard_{48000};
     std::vector<float> cartsL_, cartsR_;
+    std::unique_ptr<MusicPlayer> music_;
+    dsp::Ducker ducker_;
+    dsp::DuckerParams duckerParams_;
+    std::vector<float> musicL_, musicR_, duckGain_, voice_, recordMusic_;
+    int prevFrames_ = 0;
     // Isolated tracks are delayed by the master limiter's look-ahead so they align with Main.
     std::vector<float> recordDelay_;  // [channel][L]
     int recordDelayPos_ = 0;
