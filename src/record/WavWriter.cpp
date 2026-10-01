@@ -130,8 +130,10 @@ SinkError WavWriter::write(const float* interleaved, int frames)
 SinkError WavWriter::flushPending()
 {
     if (pending_.empty() || !sink_) return SinkError::None;
-    // Only whole frames go to disk so the data size is always frame-aligned.
-    const size_t whole = pending_.size() - pending_.size() % static_cast<size_t>(blockAlign_);
+    // Only whole frames go to disk so the data size is always frame-aligned. After a torn write the
+    // buffer starts mid-frame, so alignment is measured on the file position, not the buffer start.
+    const size_t over = static_cast<size_t>((dataBytes_ + pending_.size()) % static_cast<uint64_t>(blockAlign_));
+    const size_t whole = pending_.size() >= over ? pending_.size() - over : 0;
     size_t written = 0;
     const auto e = sink_->append(pending_.data(), whole, written);
     // Remember the start of a frame torn by the disk filling up: the header excludes it, and if

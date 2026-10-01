@@ -8,12 +8,14 @@
 #include <atomic>
 #include <cmath>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <thread>
 
 #include "Analysis.h"
 #include "EngineHarness.h"
 #include "TestDirs.h"
+#include "core/Paths.h"
 #include "core/RealtimeGuard.h"
 #include "record/FileSink.h"
 #include "record/Journal.h"
@@ -342,6 +344,131 @@ TEST_CASE("Recording: disk full keeps recording in memory and continues on anoth
         CHECK(b.getSample(0, 0) == Catch::Approx(signal(track, 0, total1)).margin(1e-6));
     }
     CHECK(total1 > 0);
+}
+
+namespace {
+uint64_t framesOf(const fs::path& f)
+{
+    auto r = openReader(f);
+    return r ? static_cast<uint64_t>(r->lengthInSamples) : 0;
+}
+bool waitFor(const std::function<bool()>& cond, int ms = 4000)
+{
+    for (int i = 0; i < ms / 20; ++i)
+    {
+        if (cond()) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    return cond();
+}
+} // namespace
+
+TEST_CASE("Recording: after a torn write, freed disk space clears the error and keeps every frame", "[record][diskfull]")
+{
+    // Regression: after a write tore a frame, flushes measured frame alignment from the buffer start
+    // and kept back the torn frame's tail forever (permanent WRITE ERROR, no header checkpoints).
+    pf8test::TempDir dir("rec-torn");
+    Budget budget;
+    budget.bytes = 400 * 1024 + 1; // odd: the cut lands inside a frame
+    RecordTap tap;
+    Recorder rec(tap, kRate, std::make_unique<FaultyFactory>(budget));
+    std::string err;
+    REQUIRE(rec.start(settings(dir.path(), FileFormat::Wav, BitDepth::Int24), err));
+    uint64_t frame = 0;
+    pushFrames(tap, frame, kRate * 4, tap.mask());
+    REQUIRE(waitFor([&] { return rec.status().writeError; }));
+    budget.bytes = int64_t{1} << 30; // space freed
+    CHECK(waitFor([&] { return !rec.status().writeError; }));
+    rec.stop();
+    const auto session = rec.status().session;
+    const auto journal = Journal::load(session / "Metadata" / "Journal.json");
+    REQUIRE(journal.has_value());
+    CHECK(journal->state == "finalised");
+    for (const auto& t : journal->tracks) CHECK(framesOf(session / paths::fromUtf8(t.file)) == frame);
+}
+
+TEST_CASE("Recording: a failed continue-elsewhere changes nothing and loses nothing", "[record][diskfull]")
+{
+    // Regression: the old code closed each old file and moved its held audio out before knowing the
+    // new file could be created; a failure destroyed that audio.
+    pf8test::TempDir dir("rec-contfail"), other("rec-contfail-other");
+    Budget budget;
+    budget.bytes = 400 * 1024;
+    RecordTap tap;
+    Recorder rec(tap, kRate, std::make_unique<FaultyFactory>(budget));
+    std::string err;
+    REQUIRE(rec.start(settings(dir.path(), FileFormat::Wav, BitDepth::Int24), err));
+    uint64_t frame = 0;
+    pushFrames(tap, frame, kRate * 4, tap.mask());
+    REQUIRE(waitFor([&] { return rec.status().writeError && rec.status().pendingBytes > 0; }));
+    const auto pendingBefore = rec.status().pendingBytes;
+    CHECK_FALSE(rec.continueElsewhere(other.path(), err)); // the "other drive" is full too
+    CHECK(err.find("nothing was changed") != std::string::npos);
+    CHECK(rec.status().pendingBytes >= pendingBefore);
+    CHECK(rec.status().session.filename() == fs::path(rec.status().session).filename()); // same session
+    budget.bytes = int64_t{1} << 30;
+    CHECK(waitFor([&] { return !rec.status().writeError; }));
+    rec.stop();
+    const auto session = rec.status().session;
+    for (const auto& t : Journal::load(session / "Metadata" / "Journal.json")->tracks)
+        CHECK(framesOf(session / paths::fromUtf8(t.file)) == frame);
+}
+
+TEST_CASE("Recording: stopping while the disk refuses writes rescues the held audio", "[record][diskfull]")
+{
+    pf8test::TempDir dir("rec-rescue"), rescue("rec-rescue-target");
+    Budget budget;
+    budget.bytes = 400 * 1024;
+    budget.freeDir = rescue.path();
+    RecordTap tap;
+    Recorder rec(tap, kRate, std::make_unique<FaultyFactory>(budget));
+    rec.setRescueDir(rescue.path());
+    std::string err;
+    REQUIRE(rec.start(settings(dir.path(), FileFormat::Wav, BitDepth::Int24), err));
+    const auto firstSession = rec.status().session;
+    uint64_t frame = 0;
+    pushFrames(tap, frame, kRate * 4, tap.mask());
+    REQUIRE(waitFor([&] { return rec.status().pendingBytes > 0; }));
+    rec.stop();
+    const auto rescued = rec.rescuedTo();
+    REQUIRE_FALSE(rescued.empty());
+    CHECK(rescued.parent_path() == rescue.path());
+    for (const char* name : {"CH01_Host _One_", "CH02_Guest_Two"})
+    {
+        const uint64_t a = framesOf(firstSession / "Audio" / (std::string(name) + ".wav"));
+        const uint64_t b = framesOf(rescued / "Audio" / (std::string(name) + "_part2.wav"));
+        CHECK(a + b == frame); // nothing lost
+        CHECK(b > 0);
+    }
+}
+
+TEST_CASE("Recording: a FLAC track keeps its audio when the disk fills and continues elsewhere", "[record][diskfull]")
+{
+    // Regression: after one failed write the FLAC writer dropped everything that followed.
+    pf8test::TempDir dir("rec-flacfull"), other("rec-flacfull-other");
+    Budget budget;
+    budget.bytes = 120 * 1024;
+    budget.freeDir = other.path();
+    RecordTap tap;
+    Recorder rec(tap, kRate, std::make_unique<FaultyFactory>(budget));
+    std::string err;
+    REQUIRE(rec.start(settings(dir.path(), FileFormat::Flac, BitDepth::Int24), err));
+    uint64_t frame = 0;
+    pushFrames(tap, frame, kRate * 6, tap.mask());
+    REQUIRE(waitFor([&] { return rec.status().writeError && rec.status().pendingBytes > 0; }));
+    const auto firstSession = rec.status().session;
+    REQUIRE(rec.continueElsewhere(other.path(), err));
+    pushFrames(tap, frame, kRate, tap.mask());
+    rec.stop();
+    const auto part2 = rec.status().session;
+    for (const char* name : {"CH01_Host _One_", "CH02_Guest_Two"})
+    {
+        const uint64_t a = framesOf(firstSession / "Audio" / (std::string(name) + ".flac"));
+        const uint64_t b = framesOf(part2 / "Audio" / (std::string(name) + "_part2.flac"));
+        INFO(name << ": part1 " << a << " part2 " << b << " pushed " << frame);
+        CHECK(b > static_cast<uint64_t>(kRate) * 3); // the held seconds plus the new one
+        CHECK(a + b + 8192 >= frame);                // at most the encoder's last block in flight
+    }
 }
 
 TEST_CASE("Recording: nothing is ever overwritten", "[record][safety]")

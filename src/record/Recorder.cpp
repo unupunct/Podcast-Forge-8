@@ -163,6 +163,7 @@ bool Recorder::start(const Settings& settings, std::string& error)
         lastRateTime_ = std::chrono::steady_clock::now();
         drainBuffer_.assign(static_cast<size_t>(rate_) * 2, 0.0f);
         markers_.clear();
+        rescuedTo_.clear();
     }
 
     // The tap ring must also hold the live audio that arrives while the worker writes the pre-roll.
@@ -361,14 +362,11 @@ void Recorder::performContinue()
         continueDone_ = true;
         return;
     }
-    // Old files: finalise to what reached the disk (best effort — the disk may still be full).
+    // 1. Open every new file first. If any fails, nothing changes: the old files keep their writers
+    //    and the audio held in memory stays where it is (the user can pick another folder).
     std::vector<Track> next;
-    for (auto& t : tracks_)
+    for (const auto& t : tracks_)
     {
-        auto pending = t.writer->takePending();
-        t.writer->finalise({});
-        t.journal.state = "finalised";
-        t.journal.samplesWritten = t.writer->framesWritten();
         Track n;
         n.id = t.id;
         n.channels = t.channels;
@@ -379,12 +377,22 @@ void Recorder::performContinue()
         std::string err;
         if (!openTrack(n, file, t.journal.name, err))
         {
-            continueError_ = err;
+            for (auto& opened : next) opened.writer->finalise({}); // empty, valid files; nothing deleted
+            continueError_ = err + " - nothing was changed, the audio is still held in memory";
             continueDone_ = true;
             return;
         }
-        n.writer->appendRaw(pending);
         next.push_back(std::move(n));
+    }
+    // 2. All new files exist: hand the held audio over, then close the old files to what reached
+    //    their disk (best effort — that disk may still be full).
+    for (size_t i = 0; i < tracks_.size(); ++i)
+    {
+        auto& t = tracks_[i];
+        next[i].writer->appendRaw(t.writer->takePending());
+        t.writer->finalise({});
+        t.journal.state = "finalised";
+        t.journal.samplesWritten = t.writer->framesWritten();
     }
     journal_.state = "continued";
     journal_.tracks.clear();
@@ -462,6 +470,30 @@ void Recorder::workerMain()
     tap_.waitForPushes();
     drainOnce(true);
     retryErrors();
+    // Audio the disk still refuses must not be discarded with the writers: continue the session in
+    // the rescue folder (normally on the system drive) and finalise it there.
+    bool pending = false;
+    {
+        std::lock_guard lock(mutex_);
+        // Flush the normal staging buffers first; only what the disk still refuses counts.
+        for (auto& t : tracks_)
+        {
+            if (const auto e = t.writer->retryPending(); e != SinkError::None) noteError(e, t.journal.file);
+            pending = pending || t.writer->pendingBytes() > 0;
+        }
+        if (pending)
+        {
+            continueRequest_ = rescueDir_.empty() ? paths::appData() / L"Rescue" : rescueDir_;
+            PF8_LOG_ERROR("record", "stop with audio still held in memory: saving it to %s", paths::utf8(*continueRequest_).c_str());
+        }
+    }
+    if (pending)
+    {
+        performContinue();
+        std::lock_guard lock(mutex_);
+        rescuedTo_ = continueError_.empty() ? session_ : std::filesystem::path();
+        if (!continueError_.empty()) PF8_LOG_ERROR("record", "rescue failed: %s", continueError_.c_str());
+    }
     std::lock_guard lock(mutex_);
     std::vector<CueMarker> cues;
     for (const auto& m : markers_.all()) cues.push_back({m.samplePos, m.label});

@@ -13,6 +13,7 @@
 
 #include "core/Log.h"
 #include "core/Paths.h"
+#include "record/FileSink.h"
 #include "record/Journal.h"
 #include "record/Markers.h"
 
@@ -32,25 +33,14 @@ std::string nowUtc()
 
 bool writeAtomic(const fs::path& file, const std::string& text, std::string& error)
 {
-    const fs::path tmp = fs::path(file.wstring() + L".saving");
+    // The previous save is kept as Project.json.bak (a second copy if the new one is ever bad).
+    std::error_code ec;
+    if (fs::is_regular_file(file, ec)) CopyFileW(file.c_str(), (file.wstring() + L".bak").c_str(), FALSE);
+    // Temp file flushed to the disk (FlushFileBuffers) before it replaces the old one, so a power
+    // loss can never leave an empty Project.json behind.
+    if (!writeFileAtomically(file, text))
     {
-        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-        if (!out)
-        {
-            error = "cannot write " + paths::utf8(tmp);
-            return false;
-        }
-        out.write(text.data(), static_cast<std::streamsize>(text.size()));
-        out.flush();
-        if (!out)
-        {
-            error = "write failed: " + paths::utf8(tmp);
-            return false;
-        }
-    }
-    if (!MoveFileExW(tmp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-    {
-        error = "cannot replace " + paths::utf8(file) + " (error " + std::to_string(GetLastError()) + ")";
+        error = "cannot write " + paths::utf8(file) + " (error " + std::to_string(GetLastError()) + ")";
         return false;
     }
     return true;
@@ -172,6 +162,16 @@ bool saveProject(const fs::path& dir, const std::string& name, const json::Value
 std::optional<LoadedProject> loadProject(const fs::path& dir, std::string& error)
 {
     auto v = readJson(dir / kProjectFile, error);
+    if (!v || (*v)["format"].asString() != kFormatId)
+    {
+        // Damaged Project.json: fall back to the previous save.
+        std::string bakError;
+        if (auto bak = readJson(fs::path((dir / kProjectFile).wstring() + L".bak"), bakError); bak && (*bak)["format"].asString() == kFormatId)
+        {
+            PF8_LOG_WARN("project", "Project.json unreadable (%s); opened Project.json.bak", error.c_str());
+            v = bak;
+        }
+    }
     if (!v) return std::nullopt;
     if ((*v)["format"].asString() != kFormatId)
     {

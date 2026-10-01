@@ -201,6 +201,15 @@ void MainWindow::requestQuit(std::function<void()> quit)
     w->enterModalState(true, juce::ModalCallbackFunction::create([this, afterRecording](int r) {
                            if (r != 1) return;
                            controller_.recorder().stop();
+                           if (const auto rescued = controller_.recorder().rescuedTo(); !rescued.empty())
+                           {
+                               // Say where the audio the disk refused went before the app closes.
+                               juce::AlertWindow::showMessageBoxAsync(
+                                   juce::MessageBoxIconType::WarningIcon, "Recording saved elsewhere",
+                                   "The disk refused the last part of the recording. It was saved to\n" + juce::String(rescued.wstring().c_str()),
+                                   "OK", nullptr, juce::ModalCallbackFunction::create([afterRecording](int) { afterRecording(); }));
+                               return;
+                           }
                            afterRecording();
                        }),
                        true);

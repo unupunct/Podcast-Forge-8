@@ -3,8 +3,10 @@
 // CREATE_NEW protection as WAV. Until finalise() the STREAMINFO total-sample count is 0 ("unknown"),
 // which decoders accept — an interrupted FLAC file stays playable up to its last complete frame.
 //
-// Limitation (docs/LIMITATIONS.md): if the disk refuses a write mid-frame, the FLAC encoder's
-// state is lost; recording continues into a new `_part2` file. WAV/BWF keep every sample.
+// If the disk refuses a write, the encoder's stream cannot be resumed: from then on the audio is
+// held in memory (as float frames, counted in pendingBytes()) until the recording continues in a
+// new `_part2` file elsewhere (takePending / appendRaw re-encode it there) or is rescued at stop.
+// The frames of the failed block may also be partly in the old file (never lost, at most doubled).
 #include "record/TrackWriter.h"
 
 namespace juce {
@@ -25,11 +27,11 @@ public:
     SinkError retryPending() override { return failed_ ? SinkError::Io : SinkError::None; }
     SinkError updateHeader() override;
     SinkError finalise(const std::vector<CueMarker>& cues) override;
-    std::vector<uint8_t> takePending() override { return {}; }
-    SinkError appendRaw(const std::vector<uint8_t>&) override { return SinkError::None; }
+    std::vector<uint8_t> takePending() override;                       // the held float frames, as bytes
+    SinkError appendRaw(const std::vector<uint8_t>& bytes) override;   // float frames from another FlacWriter
 
     uint64_t framesWritten() const override { return frames_; }
-    uint64_t pendingBytes() const override { return 0; }
+    uint64_t pendingBytes() const override { return held_.size() * sizeof(float); }
     uint64_t bytesOnDisk() const override;
     uint64_t headerBytes() const override { return 0; }
     int blockAlign() const override { return bytesPerSample(info_.depth) * info_.channels; }
@@ -42,6 +44,7 @@ private:
     std::unique_ptr<Impl> impl_;
     uint64_t frames_ = 0;
     bool failed_ = false;
+    std::vector<float> held_; // interleaved frames not encoded since the stream failed
 };
 
 } // namespace pf8

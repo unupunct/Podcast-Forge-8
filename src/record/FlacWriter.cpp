@@ -4,6 +4,9 @@
 
 #include "record/WavWriter.h"
 
+#include <algorithm>
+#include <cstring>
+
 namespace pf8 {
 namespace {
 
@@ -91,7 +94,13 @@ SinkError FlacWriter::open(const TrackFileInfo& info, std::unique_ptr<IFileSink>
 
 SinkError FlacWriter::write(const float* interleaved, int frames)
 {
-    if (failed_ || !impl_->writer) return SinkError::Io;
+    const size_t samples = static_cast<size_t>(frames) * static_cast<size_t>(info_.channels);
+    if (failed_ || !impl_->writer)
+    {
+        // The stream is broken: keep the audio (never drop it) until it continues elsewhere.
+        held_.insert(held_.end(), interleaved, interleaved + samples);
+        return SinkError::Io;
+    }
     auto& buf = impl_->buffer;
     if (buf.getNumChannels() != info_.channels || buf.getNumSamples() < frames)
         buf.setSize(info_.channels, std::max(frames, 48000), false, false, true);
@@ -103,9 +112,43 @@ SinkError FlacWriter::write(const float* interleaved, int frames)
     if (!impl_->writer->writeFromAudioSampleBuffer(buf, 0, frames))
     {
         failed_ = true;
+        held_.insert(held_.end(), interleaved, interleaved + samples); // this block too
         return impl_->lastError == SinkError::None ? SinkError::Io : impl_->lastError;
     }
     frames_ += static_cast<uint64_t>(frames);
+    return SinkError::None;
+}
+
+std::vector<uint8_t> FlacWriter::takePending()
+{
+    std::vector<uint8_t> bytes(held_.size() * sizeof(float));
+    if (!bytes.empty()) std::memcpy(bytes.data(), held_.data(), bytes.size());
+    held_.clear();
+    held_.shrink_to_fit();
+    return bytes;
+}
+
+SinkError FlacWriter::appendRaw(const std::vector<uint8_t>& bytes)
+{
+    const size_t frameBytes = sizeof(float) * static_cast<size_t>(info_.channels);
+    if (bytes.size() < frameBytes) return SinkError::None;
+    std::vector<float> f(bytes.size() / sizeof(float));
+    std::memcpy(f.data(), bytes.data(), f.size() * sizeof(float));
+    // Encode in blocks (the write buffer is sized per call).
+    const int total = static_cast<int>(bytes.size() / frameBytes);
+    for (int done = 0; done < total;)
+    {
+        const int n = std::min(48000, total - done);
+        const auto e = write(f.data() + static_cast<size_t>(done) * static_cast<size_t>(info_.channels), n);
+        if (e != SinkError::None)
+        {
+            // Not encoded: write() kept these frames; keep the rest as well.
+            const size_t from = static_cast<size_t>(done + n) * static_cast<size_t>(info_.channels);
+            held_.insert(held_.end(), f.begin() + static_cast<std::ptrdiff_t>(from), f.end());
+            return e;
+        }
+        done += n;
+    }
     return SinkError::None;
 }
 

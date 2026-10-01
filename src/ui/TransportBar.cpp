@@ -105,13 +105,23 @@ void TransportBar::pause()
 void TransportBar::stop()
 {
     if (controller_.recorder().state() == Recorder::State::Idle) return;
-    auto* w = new juce::AlertWindow("Stop recording?", "All files will be finalised.", juce::MessageBoxIconType::QuestionIcon, this);
+    const auto st = controller_.recorder().status();
+    const juce::String text = st.writeError ? "The disk is refusing writes: " + juce::String(static_cast<double>(st.pendingBytes) / 1048576.0, 1) +
+                                                  " MB of audio are held in memory. Stopping saves them to the rescue folder "
+                                                  "(%LOCALAPPDATA%\\PodcastForge8\\Rescue). CONTINUE ELSEWHERE keeps recording on another drive."
+                                            : juce::String("All files will be finalised.");
+    auto* w = new juce::AlertWindow("Stop recording?", text, st.writeError ? juce::MessageBoxIconType::WarningIcon : juce::MessageBoxIconType::QuestionIcon, this);
     w->addButton("Keep recording", 0, juce::KeyPress(juce::KeyPress::escapeKey), juce::KeyPress(juce::KeyPress::returnKey));
     w->addButton("Stop", 1);
     w->enterModalState(true, juce::ModalCallbackFunction::create([this](int r) {
                            if (r != 1) return;
                            controller_.recorder().stop();
                            timerCallback();
+                           if (const auto rescued = controller_.recorder().rescuedTo(); !rescued.empty())
+                               juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "Recording saved elsewhere",
+                                                                      "The disk refused the last part of the recording. It was saved to\n" +
+                                                                          juce::String(rescued.wstring().c_str()) +
+                                                                          "\n\nThe first part is in the project folder as usual. Nothing was lost.");
                        }),
                        true);
 }

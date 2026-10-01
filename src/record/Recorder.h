@@ -80,6 +80,15 @@ public:
     // new files under `dir`. Nothing is deleted.
     bool continueElsewhere(const std::filesystem::path& dir, std::string& error);
 
+    // After stop(): when the disk still refused writes, the audio that was held in memory was saved
+    // into this session folder (under the rescue folder) instead of being lost. Empty otherwise.
+    std::filesystem::path rescuedTo() const
+    {
+        std::lock_guard lock(mutex_);
+        return rescuedTo_;
+    }
+    void setRescueDir(const std::filesystem::path& dir) { rescueDir_ = dir; } // tests
+
     int addMarker(const std::string& label = {});
     MarkerList& markers() noexcept { return markers_; }
     std::filesystem::path metadataDir() const;
@@ -125,6 +134,8 @@ private:
     std::string writeErrorText_;
     std::chrono::steady_clock::time_point errorSince_{};
     std::optional<std::filesystem::path> continueRequest_;
+    std::filesystem::path rescueDir_; // test hook; default %LOCALAPPDATA%\PodcastForge8\Rescue
+    std::filesystem::path rescuedTo_; // set by a stop that had to save held audio elsewhere
     std::string continueError_;
     bool continueDone_ = false;
     double writeRate_ = 0.0;

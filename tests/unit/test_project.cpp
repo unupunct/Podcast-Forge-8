@@ -197,7 +197,19 @@ TEST_CASE("Project files: create, save atomically, reopen, never reuse a folder"
     fs::create_directories(*a / "Session_2026-10-01_120000" / "Metadata");
     st["x"] = 2;
     REQUIRE(project::saveProject(*a, "Renamed", json::Value(st), err));
-    CHECK_FALSE(fs::exists(*a / "Project.json.saving"));
+    CHECK_FALSE(fs::exists(*a / "Project.json.tmp"));
+    CHECK(fs::exists(*a / "Project.json.bak")); // the previous save
+    {
+        // A damaged Project.json (e.g. truncated by a crash elsewhere) opens from the backup.
+        st["x"] = 3;
+        REQUIRE(project::saveProject(*a, "Renamed", json::Value(st), err));
+        std::ofstream(*a / "Project.json", std::ios::binary | std::ios::trunc) << "{\"format\":\"PodcastForge8.Pro";
+        auto fromBak = project::loadProject(*a, err);
+        REQUIRE(fromBak.has_value());
+        CHECK(fromBak->state["x"].asInt() == 2);
+        st["x"] = 2;
+        REQUIRE(project::saveProject(*a, "Renamed", json::Value(st), err));
+    }
     auto p = project::loadProject(*a, err);
     REQUIRE(p.has_value());
     CHECK(p->name == "Renamed");
