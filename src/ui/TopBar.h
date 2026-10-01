@@ -2,6 +2,8 @@
 // TOP BAR: Project | Backend | Sample rate | Buffer | CPU | Load | Disk | Devices | Record status.
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <functional>
+
 #include "core/SystemStats.h"
 #include "engine/EngineController.h"
 #include "ui/Widgets.h"
@@ -17,6 +19,10 @@ public:
     void paint(juce::Graphics&) override;
     void collectLayoutIssues(std::vector<std::string>& issues) const override;
     void refresh(); // pulls status now (also called by the 10 Hz timer)
+    void mouseUp(const juce::MouseEvent&) override;
+
+    std::function<juce::String()> projectName; // default "Untitled"
+    std::function<void()> onProjectClicked;     // the PROJECT cell opens the project menu
 
     struct Field
     {

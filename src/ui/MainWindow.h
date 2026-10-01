@@ -7,6 +7,8 @@
 #include "ui/DeviceListView.h"
 #include "ui/DeviceMatrixView.h"
 #include "ui/DspEditor.h"
+#include "ui/HotkeyManager.h"
+#include "ui/ProjectController.h"
 #include "ui/HeadphonesView.h"
 #include "ui/MarkersView.h"
 #include "ui/MicWizard.h"
@@ -76,8 +78,16 @@ public:
     MainWindow(const juce::String& title, EngineController& controller);
     ~MainWindow() override;
     void closeButtonPressed() override;
+    // Quit flow: a running recording is stopped and finalised only after confirmation, unsaved
+    // project changes are offered for saving; then `quit` runs.
+    void requestQuit(std::function<void()> quit);
+    void shutdown(); // clean exit bookkeeping (crash-restore flag)
 
 private:
+    EngineController& controller_;
+    std::unique_ptr<ProjectController> project_;
+    std::unique_ptr<HotkeyManager> hotkeys_;
+    bool quitting_ = false;
     LookAndFeel lookAndFeel_;
     juce::TooltipWindow tooltips_{nullptr, 600};
 };

@@ -1,4 +1,5 @@
 #include "media/AudioFileLoader.h"
+#include "core/Paths.h"
 
 #include <juce_audio_formats/juce_audio_formats.h>
 
@@ -11,7 +12,7 @@ const char* supportedAudioWildcard() noexcept { return "*.wav;*.mp3;*.flac"; }
 std::shared_ptr<CartBuffer> loadAudioFile(const std::filesystem::path& file, const LoadOptions& o)
 {
     auto out = std::make_shared<CartBuffer>();
-    out->sourcePath = file.string();
+    out->sourcePath = paths::utf8(file);
     juce::AudioFormatManager mgr;
     mgr.registerBasicFormats(); // WAV, AIFF, FLAC, MP3 (JUCE_USE_MP3AUDIOFORMAT)
     std::unique_ptr<juce::AudioFormatReader> reader(mgr.createReaderFor(juce::File(juce::String(file.wstring().c_str()))));

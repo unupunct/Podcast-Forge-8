@@ -125,6 +125,7 @@ public:
     EngineMeters meters() const noexcept { return engine_.meters(); }
     Assignments assignments() const;
     const Settings& settings() const noexcept { return settings_; }
+    SettingsDb* settingsDb() const noexcept { return db_; }
 
 private:
     struct Endpoint;

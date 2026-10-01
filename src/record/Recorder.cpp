@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "core/Paths.h"
 #include "core/Log.h"
 #include "record/Session.h"
 
@@ -16,7 +17,7 @@ std::string relativePathString(const std::filesystem::path& base, const std::fil
 {
     std::error_code ec;
     auto r = std::filesystem::relative(p, base, ec);
-    return (ec ? p : r).generic_string();
+    return paths::utf8Generic(ec ? p : r);
 }
 } // namespace
 
@@ -72,7 +73,7 @@ bool Recorder::openTrack(Track& t, const std::filesystem::path& file, const std:
     const auto e = t.writer->open(info, factory_->make());
     if (e != SinkError::None)
     {
-        error = "cannot create " + file.string() + ": " + toString(e);
+        error = "cannot create " + paths::utf8(file) + ": " + toString(e);
         return false;
     }
     t.journal.file = relativePathString(t.relativeTo, file);
@@ -191,7 +192,7 @@ bool Recorder::start(const Settings& settings, std::string& error)
         if (prerollFrames_ > 0) markers_.add(prerollFrames_, "Record pressed");
     }
     worker_ = std::thread([this] { workerMain(); });
-    PF8_LOG_INFO("record", "record.start session=%s tracks=%zu format=%s bits=%d", session_.string().c_str(), tracks_.size(),
+    PF8_LOG_INFO("record", "record.start session=%s tracks=%zu format=%s bits=%d", paths::utf8(session_).c_str(), tracks_.size(),
                  toString(settings.format), static_cast<int>(settings.depth));
     return true;
 }
@@ -347,7 +348,7 @@ void Recorder::performContinue()
     if (!continueRequest_) return;
     const auto base = *continueRequest_;
     continueRequest_.reset();
-    const auto name = session_.filename().string() + "_part2";
+    const auto name = paths::utf8(session_.filename()) + "_part2";
     auto dir = base / name;
     std::error_code ec;
     std::filesystem::create_directories(dir / "Audio", ec);
@@ -355,7 +356,7 @@ void Recorder::performContinue()
     std::filesystem::create_directories(dir / "Metadata", ec);
     if (ec)
     {
-        continueError_ = "cannot create " + dir.string();
+        continueError_ = "cannot create " + paths::utf8(dir);
         continueDone_ = true;
         return;
     }
@@ -372,7 +373,7 @@ void Recorder::performContinue()
         n.channels = t.channels;
         n.relativeTo = dir;
         const auto sub = t.id == static_cast<int>(TrackId::Main) ? "Mix" : "Audio";
-        const auto file = uniqueFilePath(dir / sub, std::filesystem::path(t.journal.file).stem().string() + "_part2",
+        const auto file = uniqueFilePath(dir / sub, paths::utf8(paths::fromUtf8(t.journal.file).stem()) + "_part2",
                                          extension(settings_.format));
         std::string err;
         if (!openTrack(n, file, t.journal.name, err))
@@ -400,7 +401,7 @@ void Recorder::performContinue()
     writeErrorText_.clear();
     continueError_.clear();
     continueDone_ = true;
-    PF8_LOG_WARN("record", "recording continued in %s", dir.string().c_str());
+    PF8_LOG_WARN("record", "recording continued in %s", paths::utf8(dir).c_str());
 }
 
 bool Recorder::continueElsewhere(const std::filesystem::path& dir, std::string& error)
@@ -483,7 +484,7 @@ void Recorder::workerMain()
     journal_.droppedFrames = tap_.framesDropped();
     journal_.save(journalPath_);
     markers_.save(session_ / "Metadata");
-    PF8_LOG_INFO("record", "record.stop session=%s frames=%llu dropped=%llu", session_.string().c_str(),
+    PF8_LOG_INFO("record", "record.stop session=%s frames=%llu dropped=%llu", paths::utf8(session_).c_str(),
                  static_cast<unsigned long long>(tracks_.empty() ? 0 : tracks_.front().writer->framesWritten()),
                  static_cast<unsigned long long>(tap_.framesDropped()));
     tracks_.clear();

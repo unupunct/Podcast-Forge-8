@@ -1,4 +1,5 @@
 #include "ui/SoundboardView.h"
+#include "core/Paths.h"
 
 #include <cmath>
 #include <thread>
@@ -183,7 +184,7 @@ void SoundboardView::loadFile(int cart, const juce::File& file)
     auto& sb = controller_.engine().soundboard();
     std::thread([path, rate, safe, &sb, cart] {
         auto buf = loadAudioFile(path, {rate, 600.0});
-        const std::string name = path.stem().string();
+        const std::string name = paths::utf8(path.stem());
         juce::MessageManager::callAsync([safe, buf, name, &sb, cart] {
             sb.setBuffer(cart, buf);
             if (buf->error.empty()) sb.settings(cart).name = name;

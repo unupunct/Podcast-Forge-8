@@ -255,3 +255,29 @@
 - 99 tests: buffer wrap / freeze / release; every sample of every file continues a counter signal
   across the pre-roll → live joint (two takes); journal and marker positions; engine feeds it with
   zero RT allocations and runs on without it. 65 UI screens.
+
+## Stage 12 — Projects, crash restore, hotkeys (2026-10-01)
+
+**Added**
+- `src/project`: `ProjectState` (capture / apply of every persistent setting through shared
+  field lists), `Project` (create / atomic save / open / save-as / session index / zip archive),
+  `Hotkeys` (actions, chord parser, defaults F9–F12 / Space / F8 / Num 1–8, conflicts, JSON,
+  dispatcher with hold / repeat / focus-loss handling).
+- UI: `ProjectController` (PROJECT menu in the top bar: New, Open, Save, Save As, Archive; unsaved
+  marker; quit asks to save; crash-restore snapshot every 3 s + unclean-exit detection; one cart-
+  loader thread joined on exit) and `HotkeyManager` (focused thread hook, RegisterHotKey, low-level
+  hook only for global holds, cough state machines, cart hotkeys picked up live).
+- Quitting while recording asks first, then finalises every file.
+
+**Fixed**
+- Recording with non-ANSI characters in the project or channel names (e.g. "Ședință") threw
+  from `path::string()`; all path ↔ text conversions are now UTF-8 (`paths::utf8`, `fromUtf8`),
+  file names are built from UTF-8 and truncated on character boundaries.
+- Two test names contained non-ASCII punctuation that ctest could not match.
+
+**Verified**
+- 107 tests: chord round trips and rejects, defaults, conflicts, JSON; dispatcher holds / repeats /
+  modifier release / focus loss; capture → apply → capture identical on a fresh engine; garbage
+  values ignored and missing files reported; project create / unique folders / atomic save /
+  reopen / sessions; archive contents and no-overwrite; Unicode recording regression. 65 UI
+  screens; real-app start → quit smoke run clean (`app.running` reset).

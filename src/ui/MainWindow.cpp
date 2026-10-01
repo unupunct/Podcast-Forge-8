@@ -140,7 +140,7 @@ void MainComponent::resized()
 }
 
 MainWindow::MainWindow(const juce::String& title, EngineController& controller)
-    : juce::DocumentWindow(title, colours::background, juce::DocumentWindow::allButtons)
+    : juce::DocumentWindow(title, colours::background, juce::DocumentWindow::allButtons), controller_(controller)
 {
     juce::LookAndFeel::setDefaultLookAndFeel(&lookAndFeel_);
     setUsingNativeTitleBar(true);
@@ -149,11 +149,67 @@ MainWindow::MainWindow(const juce::String& title, EngineController& controller)
     setResizeLimits(1280, 720, 8192, 8192);
     centreWithSize(getWidth(), getHeight());
     setVisible(true);
-    if (auto* main = dynamic_cast<MainComponent*>(getContentComponent())) main->offerRecovery();
+    auto* main = dynamic_cast<MainComponent*>(getContentComponent());
+    project_ = std::make_unique<ProjectController>(controller, controller.settingsDb());
+    const juce::String baseTitle = title;
+    project_->onChanged = [this, main, baseTitle] {
+        setName(project_->displayName() + " - " + baseTitle);
+        if (main) main->topBar().refresh();
+    };
+    if (main)
+    {
+        main->topBar().projectName = [this] { return project_->displayName(); };
+        main->topBar().onProjectClicked = [this, main] { project_->showMenu(main->topBar()); };
+        HotkeyManager::Transport t;
+        t.record = [main] { main->transport().record(); };
+        t.stop = [main] { main->transport().stop(); };
+        t.pause = [main] { main->transport().pause(); };
+        t.marker = [main] { main->transport().marker(); };
+        t.idle = [&controller] { return controller.recorder().state() == Recorder::State::Idle; };
+        hotkeys_ = std::make_unique<HotkeyManager>(controller, controller.settingsDb(), std::move(t));
+    }
+    const auto note = project_->startup();
+    project_->onChanged();
+    if (main) main->offerRecovery(); // in the (possibly restored) project's folder
+    if (note.isNotEmpty()) juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon, "Welcome back", note);
+}
+
+void MainWindow::requestQuit(std::function<void()> quit)
+{
+    if (quitting_) return;
+    auto afterRecording = [this, quit] {
+        project_->confirmClose([this, quit] {
+            quitting_ = true;
+            quit();
+        });
+    };
+    if (controller_.recorder().state() == Recorder::State::Idle)
+    {
+        afterRecording();
+        return;
+    }
+    auto* w = new juce::AlertWindow("Recording in progress", "Quit and finalise the recording? Every file is closed properly.",
+                                    juce::MessageBoxIconType::WarningIcon, this);
+    w->addButton("Keep recording", 0, juce::KeyPress(juce::KeyPress::escapeKey), juce::KeyPress(juce::KeyPress::returnKey));
+    w->addButton("Stop and quit", 1);
+    w->enterModalState(true, juce::ModalCallbackFunction::create([this, afterRecording](int r) {
+                           if (r != 1) return;
+                           controller_.recorder().stop();
+                           afterRecording();
+                       }),
+                       true);
+}
+
+void MainWindow::shutdown()
+{
+    hotkeys_.reset();
+    if (project_) project_->shutdown();
 }
 
 MainWindow::~MainWindow()
 {
+    hotkeys_.reset();
+    project_.reset();
     clearContentComponent();
     juce::LookAndFeel::setDefaultLookAndFeel(nullptr);
 }

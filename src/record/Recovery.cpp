@@ -3,6 +3,7 @@
 #include <cstring>
 #include <fstream>
 
+#include "core/Paths.h"
 #include "record/FileSink.h"
 #include "record/Journal.h"
 
@@ -175,7 +176,7 @@ RecoveryReport recoverSession(const std::filesystem::path& sessionDir)
     rep.journalFound = journal.has_value();
     std::vector<std::filesystem::path> files;
     if (journal)
-        for (const auto& t : journal->tracks) files.push_back(sessionDir / std::filesystem::path(t.file));
+        for (const auto& t : journal->tracks) files.push_back(sessionDir / paths::fromUtf8(t.file));
     else
     {
         std::error_code ec;
@@ -198,7 +199,7 @@ RecoveryReport recoverSession(const std::filesystem::path& sessionDir)
         }
         else
             t = recoverWavFile(files[i]);
-        appendLog(sessionDir, files[i].filename().string() + ": " + t.note + ", " + std::to_string(t.frames) + " frames");
+        appendLog(sessionDir, paths::utf8(files[i].filename()) + ": " + t.note + ", " + std::to_string(t.frames) + " frames");
         if (journal)
         {
             journal->tracks[i].state = t.ok ? "recovered" : "failed";

@@ -1,4 +1,5 @@
 #include "media/MusicPlayer.h"
+#include "core/Paths.h"
 
 #include <juce_audio_formats/juce_audio_formats.h>
 
@@ -25,13 +26,13 @@ void MusicPlayer::setPlaylist(std::vector<std::filesystem::path> files)
 {
     std::lock_guard lock(mutex_);
     playlist_.clear();
-    for (auto& f : files) playlist_.push_back({f, f.stem().string(), 0.0, {}});
+    for (auto& f : files) playlist_.push_back({f, paths::utf8(f.stem()), 0.0, {}});
 }
 
 void MusicPlayer::add(const std::filesystem::path& file)
 {
     std::lock_guard lock(mutex_);
-    playlist_.push_back({file, file.stem().string(), 0.0, {}});
+    playlist_.push_back({file, paths::utf8(file.stem()), 0.0, {}});
 }
 
 void MusicPlayer::remove(int index)
@@ -130,7 +131,7 @@ void MusicPlayer::decoderMain()
             if (!reader)
             {
                 entry.error = "unreadable";
-                PF8_LOG_WARN("media", "music: cannot open %s", info.path.string().c_str());
+                PF8_LOG_WARN("media", "music: cannot open %s", paths::utf8(info.path).c_str());
                 stopped_ = true;
                 continue;
             }

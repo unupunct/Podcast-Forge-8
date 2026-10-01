@@ -63,6 +63,7 @@ public:
 
     void shutdown() override
     {
+        if (window_) window_->shutdown();
         window_.reset();
         controller_.reset();
         settings_.close();
@@ -73,7 +74,11 @@ public:
         }
     }
 
-    void systemRequestedQuit() override { quit(); }
+    void systemRequestedQuit() override
+    {
+        if (window_) window_->requestQuit([] { juce::JUCEApplication::quit(); });
+        else quit();
+    }
 
     void anotherInstanceStarted(const juce::String&) override
     {

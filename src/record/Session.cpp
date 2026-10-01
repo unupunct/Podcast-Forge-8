@@ -1,4 +1,5 @@
 #include "record/Session.h"
+#include "core/Paths.h"
 
 #include <windows.h>
 
@@ -35,7 +36,7 @@ std::optional<std::filesystem::path> createSessionFolder(const std::filesystem::
         }
         if (GetLastError() != ERROR_ALREADY_EXISTS)
         {
-            if (error) *error = "cannot create the session folder in " + projectDir.string();
+            if (error) *error = "cannot create the session folder in " + paths::utf8(projectDir);
             return std::nullopt;
         }
     }
@@ -60,7 +61,12 @@ std::string sanitizeFileName(const std::string& name)
     for (const char* r : reserved)
         if (upper == r) s = "_" + s;
     if (s.empty()) s = "Track";
-    if (s.size() > 80) s.resize(80);
+    if (s.size() > 80)
+    {
+        size_t n = 80;
+        while (n > 0 && (static_cast<unsigned char>(s[n]) & 0xC0) == 0x80) --n; // never split a UTF-8 character
+        s.resize(n);
+    }
     return s;
 }
 
@@ -69,10 +75,10 @@ std::filesystem::path uniqueFilePath(const std::filesystem::path& dir, const std
     std::error_code ec;
     for (int n = 1; n < 10000; ++n)
     {
-        const auto p = dir / (n == 1 ? stem + ext : stem + "_" + std::to_string(n) + ext);
+        const auto p = dir / paths::fromUtf8(n == 1 ? stem + ext : stem + "_" + std::to_string(n) + ext);
         if (!std::filesystem::exists(p, ec)) return p;
     }
-    return dir / (stem + "_overflow" + ext);
+    return dir / paths::fromUtf8(stem + "_overflow" + ext);
 }
 
 } // namespace pf8

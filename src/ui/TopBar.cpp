@@ -13,6 +13,12 @@ TopBar::TopBar(EngineController& controller) : controller_(controller)
 
 TopBar::~TopBar() { stopTimer(); }
 
+void TopBar::mouseUp(const juce::MouseEvent& e)
+{
+    const auto c = cells();
+    if (!c.empty() && c[0].contains(e.position) && onProjectClicked) onProjectClicked();
+}
+
 void TopBar::refresh()
 {
     using namespace colours;
@@ -21,7 +27,7 @@ void TopBar::refresh()
     if (tickCount_++ % 10 == 0) cpuPercent_ = cpu_.sample();
 
     fields_.clear();
-    fields_.push_back({"PROJECT", "Untitled", text});
+    fields_.push_back({"PROJECT", projectName ? projectName() : juce::String("Untitled"), text});
 
     juce::String backend;
     juce::Colour backendColour = ok;

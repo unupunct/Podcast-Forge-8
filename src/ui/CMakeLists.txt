@@ -17,8 +17,10 @@ add_library(pf8_ui STATIC
     SoundboardView.cpp
     MusicView.cpp
     TalkbackView.cpp
+    ProjectController.cpp
+    HotkeyManager.cpp
     MainWindow.cpp
 )
-target_link_libraries(pf8_ui PUBLIC pf8_juce pf8_engine pf8_dsp pf8_media pf8_record pf8_devices pf8_core)
+target_link_libraries(pf8_ui PUBLIC pf8_juce pf8_project pf8_engine pf8_dsp pf8_media pf8_record pf8_devices pf8_core)
 target_compile_options(pf8_ui PRIVATE /utf-8 /MP)
 target_compile_definitions(pf8_ui PRIVATE NOMINMAX)

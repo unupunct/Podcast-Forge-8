@@ -490,3 +490,33 @@ TEST_CASE("Recovery on a finalised file keeps its header (trailing cue chunks ar
     const bool identical = readAll(main) == before;
     CHECK(identical); // byte-identical: nothing to fix
 }
+
+TEST_CASE("Recording works with non-ANSI names (Romanian diacritics) in the project and channel names", "[record][unicode]")
+{
+    pf8test::TempDir dir("rec-unicode");
+    const fs::path project = dir.path() / fs::path(u8"Emisiune ședință");
+    RecordTap tap;
+    Recorder rec(tap, kRate);
+    auto s = settings(project, FileFormat::Wav, BitDepth::Int24);
+    s.names = {"\xC8\x98" "erban \xC8\x9A" "ic\xC4\x83", "Guest", "", "", "", "", "", ""}; // Șerban Țică (UTF-8)
+    std::string err;
+    REQUIRE(rec.start(s, err));
+    uint64_t frame = 0;
+    pushFrames(tap, frame, kRate, tap.mask());
+    rec.addMarker("\xC8\x98" "tiri");
+    rec.stop();
+    const auto session = rec.status().session;
+    const auto journal = Journal::load(session / "Metadata" / "Journal.json");
+    REQUIRE(journal.has_value());
+    CHECK(journal->state == "finalised");
+    bool found = false;
+    for (const auto& t : journal->tracks)
+    {
+        const auto path = session / fs::path(std::u8string(t.file.begin(), t.file.end()));
+        INFO(t.file);
+        CHECK(fs::exists(path));
+        if (t.file.find("\xC8\x98" "erban") != std::string::npos) found = true;
+    }
+    CHECK(found);
+    CHECK(fs::exists(session / "Metadata" / "Markers.csv"));
+}

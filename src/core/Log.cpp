@@ -1,4 +1,5 @@
 #include "core/Log.h"
+#include "core/Paths.h"
 
 #include <windows.h>
 
@@ -220,7 +221,7 @@ private:
         for (const auto& entry : std::filesystem::directory_iterator(cfg_.dir, ec))
         {
             std::smatch m;
-            const std::string name = entry.path().filename().string();
+            const std::string name = paths::utf8(entry.path().filename());
             if (std::regex_match(name, m, logNamePattern()) && m[1] == day)
                 maxIndex = std::max(maxIndex, std::stoi(m[2]));
         }
@@ -240,7 +241,7 @@ private:
         {
             if (!entry.is_regular_file()) continue;
             std::smatch m;
-            const std::string name = entry.path().filename().string();
+            const std::string name = paths::utf8(entry.path().filename());
             if (std::regex_match(name, m, logNamePattern()))
                 items.push_back({m[1], std::stoi(m[2]), entry.path()});
         }
