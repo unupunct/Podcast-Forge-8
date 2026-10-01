@@ -5,6 +5,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <map>
 #include <ctime>
 #include <fstream>
 #include <sstream>
@@ -234,13 +235,27 @@ bool archiveProject(const fs::path& dir, const fs::path& zipFile, std::string& e
     }
     juce::ZipFile::Builder zip;
     int files = 0;
+    int64_t totalBytes = 0;
+    std::map<juce::String, int64_t> expected; // entry name -> size, verified after writing
     for (const auto& entry : juce::RangedDirectoryIterator(root, true, "*", juce::File::findFiles))
     {
         const auto f = entry.getFile();
         const auto ext = f.getFileExtension().toLowerCase();
         const bool audio = ext == ".wav" || ext == ".flac" || ext == ".mp3" || ext == ".rf64";
-        zip.addFile(f, audio ? 0 : 6, f.getRelativePathFrom(root.getParentDirectory()).replaceCharacter('\\', '/'));
+        const auto name = f.getRelativePathFrom(root.getParentDirectory()).replaceCharacter('\\', '/');
+        zip.addFile(f, audio ? 0 : 6, name);
+        expected[name] = f.getSize();
+        totalBytes += f.getSize();
         ++files;
+    }
+    // The zip writer has no ZIP64: beyond 4 GiB offsets and sizes would wrap and the archive would
+    // be unreadable. Refuse instead of producing a corrupt "successful" archive.
+    constexpr int64_t kZipLimit = (int64_t{1} << 32) - (int64_t{64} << 20); // 64 MiB headroom for headers
+    if (totalBytes >= kZipLimit)
+    {
+        error = "the project is " + std::to_string(totalBytes >> 20) +
+                " MB; zip archives are limited to 4 GB. Copy the project folder instead (it is self-contained).";
+        return false;
     }
     const juce::File out(juce::String(zipFile.wstring().c_str()));
     const juce::File tmp = out.getSiblingFile(out.getFileName() + ".part");
@@ -251,6 +266,9 @@ bool archiveProject(const fs::path& dir, const fs::path& zipFile, std::string& e
             error = "cannot write " + paths::utf8(zipFile);
             return false;
         }
+        // A FileOutputStream appends to an existing file: start our temp file from empty.
+        os->setPosition(0);
+        os->truncate();
         double progress = 0;
         if (!zip.writeToStream(*os, &progress))
         {
@@ -260,6 +278,30 @@ bool archiveProject(const fs::path& dir, const fs::path& zipFile, std::string& e
             return false;
         }
         os->flush();
+        if (os->getStatus().failed())
+        {
+            os.reset();
+            tmp.deleteFile();
+            error = "writing the archive failed (disk full?)";
+            return false;
+        }
+    }
+    // Read it back: every file present with its full size, before calling it a success.
+    {
+        juce::ZipFile check(tmp);
+        bool ok = check.getNumEntries() == files;
+        for (int i = 0; ok && i < check.getNumEntries(); ++i)
+        {
+            const auto* e = check.getEntry(i);
+            const auto it = expected.find(e->filename);
+            ok = it != expected.end() && it->second == e->uncompressedSize;
+        }
+        if (!ok)
+        {
+            tmp.deleteFile();
+            error = "the archive did not verify (its contents differ from the project); nothing was changed";
+            return false;
+        }
     }
     if (!tmp.moveFileTo(out))
     {

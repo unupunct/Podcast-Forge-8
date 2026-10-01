@@ -417,18 +417,34 @@ bool WasapiStream::start()
         return false;
     }
     status_ = StreamStatus::Running;
-    d.thread = std::thread([this] { threadMain(); });
+    threadExited_ = false;
+    d.thread = std::thread([this] {
+        threadMain();
+        threadExited_.store(true, std::memory_order_release);
+    });
     return true;
 }
 
-void WasapiStream::stop()
+bool WasapiStream::stop()
 {
     auto& d = *impl_;
     stopRequested_ = true;
     if (d.event) SetEvent(d.event);
-    if (d.thread.joinable()) d.thread.join();
+    if (d.thread.joinable())
+    {
+        // The loop wakes at least every 200 ms; a thread still busy after 3 s is stuck in a driver
+        // call (or a stalled tick) and would hang whoever waits for it.
+        for (int i = 0; i < 600 && !threadExited_.load(std::memory_order_acquire); ++i) Sleep(5);
+        if (!threadExited_.load(std::memory_order_acquire))
+        {
+            d.thread.detach();
+            return false;
+        }
+        d.thread.join();
+    }
     if (d.client) d.client->Stop();
     if (status_ == StreamStatus::Running) status_ = StreamStatus::Closed;
+    return true;
 }
 
 void WasapiStream::threadMain()

@@ -234,4 +234,12 @@ TEST_CASE("Project archive: zips everything, refuses to overwrite", "[project]")
     CHECK(wav->uncompressedSize == 100000);
     CHECK_FALSE(project::archiveProject(*p, zip, err)); // exists: never overwritten
     CHECK(fs::exists(*p / "Session_1" / "Audio" / "CH01_Host.wav")); // source untouched
+
+    // A leftover temp file from an interrupted archive is not appended to (regression).
+    const fs::path zip2 = dir.path() / "Show2.zip";
+    std::ofstream(fs::path(zip2.wstring() + L".part"), std::ios::binary) << std::string(5000, 'x');
+    REQUIRE(project::archiveProject(*p, zip2, err));
+    juce::ZipFile z2(juce::File(juce::String(zip2.wstring().c_str())));
+    CHECK(z2.getNumEntries() == 2);
+    CHECK(fs::file_size(zip2) < fs::file_size(zip) + 100);
 }

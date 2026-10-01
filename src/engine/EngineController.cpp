@@ -127,6 +127,7 @@ bool EngineController::startRecording(std::string& error)
 
 EngineController::~EngineController()
 {
+    shuttingDown_ = true;
     watchdogQuit_ = true;
     if (watchdog_.joinable()) watchdog_.join();
     // Finalise any recording first: files must always end valid.
@@ -139,8 +140,7 @@ EngineController::~EngineController()
             std::lock_guard lock(stateMutex_);
             closing.swap(endpoints_);
         }
-        for (auto& [k, e] : closing)
-            if (e->stream) e->stream->stop();
+        for (auto& [k, e] : closing) closeEndpoint(e);
         closing.clear();
         engine_.setGraph(std::make_unique<EngineGraph>());
     });
@@ -255,9 +255,22 @@ std::vector<GlitchEvent> EngineController::glitches() const
     return {glitches_.begin(), glitches_.end()};
 }
 
+void EngineController::closeEndpoint(std::unique_ptr<Endpoint>& e)
+{
+    if (!e || !e->stream) return;
+    if (!e->stream->stop())
+    {
+        // The stream thread is stuck in the driver: it can be neither joined nor freed safely.
+        // Abandon this one endpoint (a small leak) rather than hang the control thread.
+        PF8_LOG_ERROR("device", "stream %s did not stop within 3 s (driver hang): abandoned", e->endpointId.c_str());
+        (void)e.release();
+    }
+}
+
 void EngineController::restartAudio()
 {
     post([this] {
+        if (shuttingDown_.load()) return;
         PF8_LOG_WARN("engine", "audio restart: closing every stream");
         std::map<std::string, std::unique_ptr<Endpoint>> closing;
         {
@@ -266,8 +279,7 @@ void EngineController::restartAudio()
             masterKey_.clear();
         }
         engine_.setGraph(std::make_unique<EngineGraph>());
-        for (auto& [k, e] : closing)
-            if (e->stream) e->stream->stop();
+        for (auto& [k, e] : closing) closeEndpoint(e);
         closing.clear();
         engine_.stopInternalClock();
         reconcile(); // reopens everything from the assignments, starts the internal clock if needed
@@ -702,6 +714,8 @@ std::unique_ptr<EngineController::Endpoint> EngineController::openEndpoint(const
 
 void EngineController::reconcile()
 {
+    // A hotplug / rescan / restart job still queued at shutdown must not reopen devices.
+    if (shuttingDown_.load()) return;
     const auto devices = registry_.devices();
     Assignments a = assignments();
     auto res = resolveAll(a, devices);
@@ -869,7 +883,7 @@ void EngineController::reconcile()
     for (auto& e : closing)
     {
         PF8_LOG_INFO("device", "stream.close id=%s", e->endpointId.c_str());
-        e->stream->stop();
+        closeEndpoint(e);
     }
     closing.clear(); // bridges stay alive through the retired graphs' shared_ptrs until collected
 

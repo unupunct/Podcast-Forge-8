@@ -63,6 +63,64 @@ TEST_CASE("Ducker allocates nothing", "[dsp][ducking][rt]")
     CHECK(rt::allocationsOnRealtimeThreads() == 0);
 }
 
+TEST_CASE("MusicPlayer plays low-rate files (22.05 / 16 kHz) without skipping", "[media][music]")
+{
+    // Regression: one resampler pass could not drain a 4096-frame chunk when the output expands by
+    // more than 2x; the excess input was silently dropped (audible skips = phase steps).
+    for (double fileRate : {22050.0, 16000.0})
+    {
+        INFO("file rate " << fileRate);
+        pf8test::TempDir dir("music-lowrate");
+        juce::WavAudioFormat wav;
+        const auto p = dir.path() / "low.wav";
+        {
+            std::unique_ptr<juce::OutputStream> os = std::make_unique<juce::FileOutputStream>(juce::File(juce::String(p.wstring().c_str())));
+            auto w = wav.createWriterFor(os, juce::AudioFormatWriterOptions{}.withSampleRate(fileRate).withNumChannels(1).withBitsPerSample(16));
+            const int n = static_cast<int>(fileRate * 3);
+            juce::AudioBuffer<float> b(1, n);
+            for (int i = 0; i < n; ++i) b.setSample(0, i, static_cast<float>(0.4 * std::sin(2 * pf8test::kPi * 500.0 * i / fileRate)));
+            w->writeFromAudioSampleBuffer(b, 0, n);
+        }
+        MusicPlayer mp(48000);
+        mp.volume().set(1.0f);
+        mp.autoAdvance() = false;
+        mp.setPlaylist({p});
+        mp.play(0);
+        std::vector<float> l(480), r(480), all;
+        for (int k = 0; k < 250; ++k) // 2.5 s
+        {
+            mp.render(l.data(), r.data(), 480, nullptr);
+            all.insert(all.end(), l.begin(), l.end());
+            Sleep(1);
+        }
+        CHECK(mp.status().underruns == 0);
+        // Playback starts once the decoder has opened the file (start-up latency is not a skip).
+        size_t start = 0;
+        while (start < all.size() && std::abs(all[start]) < 0.01f) ++start;
+        REQUIRE(start < 48000 * 3 / 10); // audible within 0.3 s
+        // Everything rendered since then was played: nothing skipped, nothing repeated.
+        CHECK(mp.status().position == Approx((all.size() - start) / 48000.0).margin(0.03));
+        // The tone's phase is constant across 480-sample blocks (5 periods) once playing: a dropped
+        // or repeated frame shows up as a step. Skip the start-up and the 50 ms fade-in.
+        double prev = 0;
+        int steps = 0;
+        const size_t first = (start / 480 + 12) * 480;
+        for (size_t b = first; b + 480 <= all.size(); b += 480)
+        {
+            double re = 0, im = 0;
+            for (size_t i = 0; i < 480; ++i)
+            {
+                const double w = 2 * pf8test::kPi * 500.0 * static_cast<double>(b + i) / 48000.0;
+                re += all[b + i] * std::cos(w);
+                im += all[b + i] * std::sin(w);
+            }
+            const double ph = std::atan2(im, re);
+            if (b > first && std::abs(std::remainder(ph - prev, 2 * pf8test::kPi)) > 0.02) ++steps;
+            prev = ph;
+        }
+        CHECK(steps == 0);
+    }
+}
 TEST_CASE("MusicPlayer streams a playlist continuously, pauses, fades and advances", "[media][music]")
 {
     pf8test::TempDir dir("music");

@@ -21,7 +21,9 @@ public:
 
     bool open(std::string& error);
     bool start();
-    void stop();
+    // Returns false when the stream thread did not exit within 3 s (stuck in the driver): the
+    // thread is then detached and this object must be kept alive (abandoned) by the owner.
+    bool stop();
 
     const StreamConfig& config() const noexcept { return config_; }
     StreamStatus status() const noexcept { return status_.load(); }
@@ -51,6 +53,7 @@ private:
     int bufferFrames_ = 0;
     StreamMode grantedMode_ = StreamMode::Shared;
     bool rawGranted_ = false;
+    std::atomic<bool> threadExited_{true};
 };
 
 } // namespace pf8

@@ -3,6 +3,7 @@
 // a write in progress. T must be trivially copyable.
 #include <atomic>
 #include <cstring>
+#include <immintrin.h>
 #include <type_traits>
 
 namespace pf8 {
@@ -36,19 +37,23 @@ public:
         return true;
     }
 
-    // Retries a bounded number of times; falls back to the last good value. Reader-thread only.
+    // Any number of reader threads. The writer's critical section is one memcpy, so a bounded spin
+    // always succeeds in practice; if it ever did not, a value-initialised T ("no data yet") is
+    // returned. (No shared fallback copy: several readers writing one would race and tear it.)
     T read() const noexcept
     {
         T out{};
-        for (int i = 0; i < 64; ++i)
-            if (tryRead(out)) { last_ = out; return out; }
-        return last_;
+        for (int i = 0; i < 4096; ++i)
+        {
+            if (tryRead(out)) return out;
+            _mm_pause();
+        }
+        return T{};
     }
 
 private:
     std::atomic<unsigned> seq_{0};
     alignas(64) unsigned char storage_[sizeof(T)]{};
-    mutable T last_{};
 };
 
 } // namespace pf8

@@ -160,6 +160,7 @@ private:
     void reconcile();
     void onHotplug();
     void onStreamEnded(const std::string& key);
+    void closeEndpoint(std::unique_ptr<Endpoint>& e); // stops the stream; abandons it if the driver hangs
     std::unique_ptr<Endpoint> openEndpoint(const std::string& endpointId, Flow flow, bool master, int pairs);
 
     Settings settings_;
@@ -187,6 +188,7 @@ private:
     void noteGlitch(GlitchEvent e);
     std::thread watchdog_;
     std::atomic<bool> watchdogQuit_{false};
+    std::atomic<bool> shuttingDown_{false}; // set first in the destructor: no device is (re)opened after it
     std::atomic<uint64_t> stalls_{0}, restarts_{0};
     mutable std::mutex glitchMutex_;
     std::deque<GlitchEvent> glitches_;

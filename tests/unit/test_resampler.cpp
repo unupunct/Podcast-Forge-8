@@ -1,4 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
+
+#include <cmath>
 
 #include <vector>
 
@@ -8,6 +11,7 @@
 
 using namespace pf8;
 using namespace pf8test;
+using Catch::Approx;
 
 namespace {
 // Streams `seconds` of a sine at inRate through the resampler in blocks of `block` output frames.
@@ -33,6 +37,42 @@ std::vector<float> run(double inRate, double outRate, double freq, double second
     return out;
 }
 } // namespace
+
+TEST_CASE("VarResampler upsampling 22.05k to 48k in large pushed chunks stays phase-continuous", "[engine][resampler]")
+{
+    // The music decoder's pattern: push 4096 input frames, drain with as many process() calls as
+    // needed. A dropped or repeated input frame shows up as a step in the phase of the sine.
+    const double inRate = 22050, outRate = 48000, f = 500;
+    const int maxOut = static_cast<int>(std::ceil(4096.0 * outRate / inRate)) + VarResampler::kTaps + 16;
+    VarResampler rs;
+    rs.prepare(2, inRate / outRate, maxOut);
+    std::vector<float> chunk(4096 * 2), out(static_cast<size_t>(maxOut) * 2), y;
+    int64_t n = 0;
+    for (int c = 0; c < 16; ++c)
+    {
+        for (int i = 0; i < 4096; ++i, ++n) chunk[2 * i] = chunk[2 * i + 1] = static_cast<float>(0.4 * std::sin(2 * kPi * f * n / inRate));
+        int offset = 0;
+        while (offset < 4096)
+        {
+            const int acc = rs.pushInput(chunk.data() + 2 * offset, 4096 - offset);
+            offset += acc;
+            int produced;
+            do
+            {
+                produced = rs.process(out.data(), maxOut);
+                for (int i = 0; i < produced; ++i) y.push_back(out[2 * i]);
+            } while (produced == maxOut);
+            REQUIRE((acc > 0 || produced > 0));
+        }
+    }
+    // Any phase step (dropped / repeated input) makes the windowed tone amplitude dip.
+    CHECK(static_cast<double>(y.size()) == Approx(16 * 4096 * outRate / inRate).margin(64));
+    for (size_t at = 2048; at + 4096 <= y.size(); at += 1024)
+    {
+        INFO("at " << at << " (" << at / outRate << " s)");
+        REQUIRE(toneAmplitude(y.data() + at, 4096, f, outRate) == Approx(0.4).margin(0.005));
+    }
+}
 
 TEST_CASE("VarResampler passthrough at ratio 1 is exact with zero latency", "[engine][resampler]")
 {

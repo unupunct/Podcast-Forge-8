@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <thread>
 
 #include "core/SpscRing.h"
 
@@ -45,7 +46,12 @@ public:
     uint32_t mask() const noexcept { return mask_; }
     SpscRing<float>* ring(int track) noexcept { return rings_[static_cast<size_t>(track)].get(); }
 
-    void setActive(bool on) noexcept { active_.store(on, std::memory_order_release); }
+    void setActive(bool on) noexcept { active_.store(on, std::memory_order_seq_cst); }
+    // Control thread, after setActive(false): waits until a push already in progress has finished.
+    void waitForPushes() const noexcept
+    {
+        while (inPush_.load(std::memory_order_seq_cst) != 0) std::this_thread::yield();
+    }
     bool active() const noexcept { return active_.load(std::memory_order_acquire); }
     void setPaused(bool on) noexcept { paused_.store(on, std::memory_order_release); }
     bool paused() const noexcept { return paused_.load(std::memory_order_acquire); }
@@ -54,7 +60,15 @@ public:
     // Returns false (and counts a dropout) when any ring lacks space — the whole block is dropped.
     bool push(const std::array<const float*, kTrackCount>& data, int frames) noexcept
     {
-        if (!active() || paused()) return true;
+        // In-push marker first, then the active check (both seq_cst): after setActive(false),
+        // waitForPushes() returns only when no push can still be writing.
+        inPush_.fetch_add(1, std::memory_order_seq_cst);
+        struct Leave
+        {
+            std::atomic<int>& n;
+            ~Leave() { n.fetch_sub(1, std::memory_order_release); }
+        } leave{inPush_};
+        if (!active_.load(std::memory_order_seq_cst) || paused()) return true;
         for (int t = 0; t < kTrackCount; ++t)
             if ((mask_ & (1u << t)) && rings_[static_cast<size_t>(t)] &&
                 rings_[static_cast<size_t>(t)]->freeSpace() < static_cast<size_t>(frames * trackChannels(t)))
@@ -93,6 +107,7 @@ private:
     uint32_t mask_ = 0;
     std::array<std::unique_ptr<SpscRing<float>>, kTrackCount> rings_;
     std::atomic<bool> active_{false}, paused_{false};
+    std::atomic<int> inPush_{0};
     std::atomic<uint64_t> framesPushed_{0}, framesDropped_{0}, dropEvents_{0};
 };
 

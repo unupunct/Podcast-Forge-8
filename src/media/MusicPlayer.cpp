@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 
 #include "core/Log.h"
 #include "dsp/VarResampler.h"
@@ -97,6 +98,7 @@ void MusicPlayer::decoderMain()
     VarResampler rs;
     juce::AudioBuffer<float> in(2, 4096);
     std::vector<float> inter(4096 * 2), out(8192 * 2);
+    int maxOut = 8192;
     uint32_t seenStart = 0;
     int64_t readPos = 0;
     bool resampling = false;
@@ -127,6 +129,14 @@ void MusicPlayer::decoderMain()
             }
             reader.reset(mgr.createReaderFor(juce::File(juce::String(info.path.wstring().c_str()))));
             std::lock_guard lock(mutex_);
+            // The playlist may have changed while the file was opening (no lock held then).
+            if (index >= static_cast<int>(playlist_.size()) || playlist_[static_cast<size_t>(index)].path != info.path)
+            {
+                reader.reset();
+                stopped_ = true;
+                playingIndex_ = -1;
+                continue;
+            }
             auto& entry = playlist_[static_cast<size_t>(index)];
             if (!reader)
             {
@@ -140,7 +150,10 @@ void MusicPlayer::decoderMain()
             playingIndex_ = index;
             readPos = 0;
             resampling = std::abs(reader->sampleRate - rate_) > 0.5;
-            if (resampling) rs.prepare(2, reader->sampleRate / rate_, 8192);
+            // Output frames one 4096-frame input chunk can become (low-rate files expand a lot).
+            maxOut = static_cast<int>(std::ceil(4096.0 * rate_ / reader->sampleRate)) + VarResampler::kTaps + 16;
+            out.assign(static_cast<size_t>(maxOut) * 2, 0.0f);
+            if (resampling) rs.prepare(2, reader->sampleRate / rate_, maxOut);
         }
 
         if (!reader || stopped_.load())
@@ -149,7 +162,7 @@ void MusicPlayer::decoderMain()
             continue;
         }
         // Keep the ring about full; decode in chunks.
-        if (ring_.freeSpace() < 8192 * 2 + 64)
+        if (ring_.freeSpace() < static_cast<size_t>(maxOut) * 2 + 64)
         {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
@@ -177,10 +190,20 @@ void MusicPlayer::decoderMain()
             ring_.push(inter.data(), static_cast<size_t>(n) * 2);
         else
         {
-            rs.pushInput(inter.data(), n);
-            const int produced = rs.process(out.data(), 8192);
-            ring_.push(out.data(), static_cast<size_t>(produced) * 2);
-        }
+            // Push the whole chunk, draining the resampler as often as needed: nothing is dropped.
+            int offset = 0;
+            for (int guard = 0; guard < 64 && offset < n; ++guard)
+            {
+                const int accepted = rs.pushInput(inter.data() + static_cast<size_t>(offset) * 2, n - offset);
+                offset += accepted;
+                int produced = 0;
+                do
+                {
+                    produced = rs.process(out.data(), maxOut);
+                    if (produced > 0) ring_.push(out.data(), static_cast<size_t>(produced) * 2);
+                } while (produced == maxOut);
+                if (accepted == 0 && produced == 0) break;
+            }        }
     }
 }
 

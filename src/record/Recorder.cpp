@@ -168,6 +168,7 @@ bool Recorder::start(const Settings& settings, std::string& error)
     // The tap ring must also hold the live audio that arrives while the worker writes the pre-roll.
     double ring = settings.ringSeconds;
     if (prerollSource_ && prerollSource_->capacity() > 0) ring += std::min(20.0, 4.0 + prerollSource_->seconds() / 4.0);
+    tap_.waitForPushes(); // the tap is inactive; never replace rings a push could still be using
     tap_.configure(mask, rate_, ring);
     tap_.setPaused(false);
     stopRequested_ = false;
@@ -457,8 +458,8 @@ void Recorder::workerMain()
         }
     }
 
-    // Stop: the tap is inactive; give an in-flight tick time to finish its push, then drain all.
-    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    // Stop: the tap is inactive; wait for a push already in progress, then drain everything.
+    tap_.waitForPushes();
     drainOnce(true);
     retryErrors();
     std::lock_guard lock(mutex_);
