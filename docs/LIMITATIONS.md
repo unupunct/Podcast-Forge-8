@@ -56,8 +56,17 @@ Maintained as each stage lands. Windows-specific constraints first.
 
 ## Recording
 
-- **FLAC and a full disk:** if the disk refuses a write in the middle of a FLAC frame, that frame's
-  encoder state is lost; recording continues into a new `_part2` file. WAV/BWF keep every sample.
+- **FLAC and a full disk:** a FLAC stream cannot resume after a failed write. The track then holds
+  its audio in memory until the recording continues in another folder (or is rescued at stop), so
+  nothing is lost, but the last encoder block before the failure may appear in both parts (at most
+  a few thousand samples doubled). WAV/BWF continue sample-exactly.
+- **Rescued audio** (stop while the disk refuses writes) lands in
+  `%LOCALAPPDATA%\PodcastForge8\Rescue\` and is not listed in the project automatically; the app
+  says where it is. Recovery (`--recover`) works on those folders as on any session.
+- **Project archives** are zip files and limited to 4 GB (the zip writer has no ZIP64). Larger
+  projects are refused with a clear message; copy the project folder instead (it is self-contained).
+- **Devices with more than 32 channels** (e.g. some Dante / MADI virtual devices) are refused with a
+  message instead of being opened.
 - Recovery rebuilds WAV/BWF/RF64 headers from the real file length; markers of an interrupted session
   are in `Metadata/Markers.json` (the cue chunk is only written when a recording stops normally).
 - Version 1.0 records CH1–CH8, the Main mix and (optionally) the music. A System-audio (WASAPI

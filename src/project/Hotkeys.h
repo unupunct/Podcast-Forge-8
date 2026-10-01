@@ -97,6 +97,17 @@ class HotkeyDispatcher
 {
 public:
     std::function<void(HotkeyAction, bool down)> onAction;
+    // Called instead of onAction(a, false) when a hold ends without a real key-up (releaseAll,
+    // a key found physically up): talkback must not count it as a tap. Falls back to onAction.
+    std::function<void(HotkeyAction)> onCancel;
+    // Keys currently held for hold actions (to check against the physical keyboard).
+    std::vector<int> heldKeys() const
+    {
+        std::vector<int> k;
+        for (const auto& h : held_) k.push_back(h.first);
+        return k;
+    }
+    void cancelKey(int vk); // a held key found up without its key-up event
 
     // `bindings`: the active set (focused: all; global hook: the global ones). Cart chords from the
     // soundboard are merged in by the caller.

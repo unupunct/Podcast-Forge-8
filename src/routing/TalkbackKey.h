@@ -58,6 +58,20 @@ public:
             active_ = false;
     }
 
+    // A key-up the app did not really see (focus lost, configuration change): end a press in
+    // progress without treating it as a tap — it must never latch talkback on. A latch stays.
+    void cancelHold() noexcept
+    {
+        if (!down_) return;
+        down_ = false;
+        if (swallowRelease_)
+        {
+            swallowRelease_ = false;
+            return;
+        }
+        if (!latched_) active_ = false;
+    }
+
     void reset() noexcept
     {
         down_ = latched_ = active_ = swallowRelease_ = false;

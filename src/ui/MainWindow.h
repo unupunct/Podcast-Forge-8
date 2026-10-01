@@ -51,7 +51,7 @@ public:
 
 private:
     EngineController& controller_;
-    std::array<juce::Component::SafePointer<juce::DialogWindow>, kNumChannels> dsp_{}, wizard_{};
+    std::array<juce::Component::SafePointer<juce::DocumentWindow>, kNumChannels> dsp_{}, wizard_{};
 };
 
 class MainComponent : public juce::Component

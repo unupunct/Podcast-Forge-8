@@ -27,6 +27,35 @@ void MixerPage::resized()
     mixer_.setBounds(r);
 }
 
+// A non-modal tool window (DSP editor, mic wizard): the console, the transport and every hotkey
+// keep working while it is open. It deletes itself when closed.
+class ToolWindow : public juce::DocumentWindow
+{
+public:
+    ToolWindow(const juce::String& title, juce::Component* content, bool resizable)
+        : juce::DocumentWindow(title, colours::background, juce::DocumentWindow::closeButton)
+    {
+        setUsingNativeTitleBar(true);
+        setContentOwned(content, true);
+        setResizable(resizable, false);
+        centreWithSize(getWidth(), getHeight());
+        setVisible(true);
+    }
+    void closeButtonPressed() override
+    {
+        juce::MessageManager::callAsync([safe = juce::Component::SafePointer<ToolWindow>(this)] { delete safe.getComponent(); });
+    }
+    bool keyPressed(const juce::KeyPress& k) override
+    {
+        if (k == juce::KeyPress::escapeKey)
+        {
+            closeButtonPressed();
+            return true;
+        }
+        return juce::DocumentWindow::keyPressed(k);
+    }
+};
+
 ChannelWindows::~ChannelWindows()
 {
     for (auto* arr : {&dsp_, &wizard_})
@@ -45,15 +74,9 @@ void ChannelWindows::openDspEditor(int channel)
     auto* editor = new DspEditor(controller_, channel);
     editor->setSize(1280, 760);
     editor->onRunWizard = [this](int ch) { openWizard(ch); };
-    juce::DialogWindow::LaunchOptions o;
-    o.content.setOwned(editor);
-    o.dialogTitle = "Channel " + juce::String(channel + 1) + " processing";
-    o.dialogBackgroundColour = colours::background;
-    o.escapeKeyTriggersCloseButton = true;
-    o.useNativeTitleBar = true;
-    o.resizable = true;
-    slot = o.launchAsync();
-    if (slot) slot->setResizeLimits(1100, 680, 4000, 3000);
+    auto* w = new ToolWindow("Channel " + juce::String(channel + 1) + " processing", editor, true);
+    w->setResizeLimits(1100, 680, 4000, 3000);
+    slot = w;
 }
 
 void ChannelWindows::openWizard(int channel)
@@ -66,18 +89,9 @@ void ChannelWindows::openWizard(int channel)
     }
     auto* wiz = new MicWizard(controller_, channel);
     wiz->setSize(860, 600);
-    juce::DialogWindow::LaunchOptions o;
-    o.content.setOwned(wiz);
-    o.dialogTitle = "Microphone setup - channel " + juce::String(channel + 1);
-    o.dialogBackgroundColour = colours::background;
-    o.escapeKeyTriggersCloseButton = true;
-    o.useNativeTitleBar = true;
-    o.resizable = false;
-    slot = o.launchAsync();
-    juce::Component::SafePointer<juce::DialogWindow> safe = slot;
-    wiz->onClose = [safe] {
-        if (safe) safe->exitModalState(0), delete safe.getComponent();
-    };
+    auto* w = new ToolWindow("Microphone setup - channel " + juce::String(channel + 1), wiz, false);
+    slot = w;
+    wiz->onClose = [w] { w->closeButtonPressed(); };
 }
 
 MainComponent::MainComponent(EngineController& controller)

@@ -425,7 +425,8 @@ bool Recorder::continueElsewhere(const std::filesystem::path& dir, std::string& 
     continueDone_ = false;
     lock.unlock();
     cv_.notify_all();
-    for (int i = 0; i < 200; ++i)
+    // Moving a large amount of held audio to the new drive can take a while.
+    for (int i = 0; i < 1500; ++i)
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
         std::lock_guard l(mutex_);
@@ -435,7 +436,7 @@ bool Recorder::continueElsewhere(const std::filesystem::path& dir, std::string& 
             return error.empty();
         }
     }
-    error = "timed out";
+    error = "still switching to the new folder after 15 s - it continues in the background; the status line shows when the write error clears";
     return false;
 }
 

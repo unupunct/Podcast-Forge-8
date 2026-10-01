@@ -8,6 +8,7 @@
 #include "core/Paths.h"
 #include "engine/EngineController.h"
 #include "project/Hotkeys.h"
+#include "routing/TalkbackKey.h"
 #include "project/Project.h"
 #include "project/ProjectState.h"
 
@@ -101,6 +102,39 @@ TEST_CASE("Hotkeys: dispatcher: press actions, holds, repeats and focus loss", "
     CHECK(log[1] == std::make_pair(coughAction(2), false));
 
     CHECK_FALSE(d.keyDown(*parseChord("Q"))); // unbound: not consumed
+
+    // Forced releases use onCancel (talkback must not treat them as a tap), and a held key found
+    // physically up can be cancelled individually.
+    std::vector<HotkeyAction> cancelled;
+    d.onCancel = [&](HotkeyAction a) { cancelled.push_back(a); };
+    log.clear();
+    d.keyDown(*parseChord("Ctrl+T"));
+    d.releaseAll();
+    REQUIRE(cancelled.size() == 1);
+    CHECK(cancelled[0] == HotkeyAction::Talkback);
+    CHECK(log.size() == 1); // only the press went through onAction
+    d.keyDown(n3);
+    CHECK(d.heldKeys() == std::vector<int>{n3.vk});
+    d.cancelKey(n3.vk);
+    CHECK(d.heldKeys().empty());
+    CHECK(cancelled.back() == coughAction(2));
+}
+
+TEST_CASE("TalkbackKey: a forced release never latches", "[hotkeys][talkback]")
+{
+    // Regression: losing focus within 300 ms of pressing the talkback key counted as a tap and left
+    // talkback latched on to the guests' headphones.
+    TalkbackKey k;
+    k.press(0);
+    k.cancelHold();
+    CHECK_FALSE(k.active());
+    CHECK_FALSE(k.latched());
+    // A deliberate latch survives a forced release.
+    k.press(1000);
+    k.release(1050);
+    REQUIRE(k.latched());
+    k.cancelHold();
+    CHECK(k.active());
 }
 
 // ---------------------------------------------------------------- project state

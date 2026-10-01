@@ -270,7 +270,9 @@ int runE2E(const juce::StringArray& args)
     const auto t0 = std::chrono::steady_clock::now();
     auto at = [&](double s) { std::this_thread::sleep_until(t0 + std::chrono::milliseconds(static_cast<int64_t>(s * 1000))); };
     float minDuck = 0.0f;
-    bool marker = false, cart = false, tbOn = false, tbOff = false;
+    bool marker = false, cart = false, tbOn = false, tbOff = false, restarted = false;
+    // After the level-check window (8 s) and early enough for every device to re-lock (20-25 s).
+    const double restartAt = seconds >= 45.0 ? 10.0 : 0.0;
     for (double t = 0.0; t < seconds; t += 0.1)
     {
         at(t);
@@ -286,6 +288,9 @@ int runE2E(const juce::StringArray& args)
         if (!cart && t >= 3.0) e.soundboard().play(0), cart = true;
         if (!tbOn && t >= 4.0) rp.talkbackActive = true, tbOn = true;
         if (!tbOff && t >= 6.0) rp.talkbackActive = false, tbOff = true;
+        // An audio restart (what the watchdog does) in the middle of the recording: the engine
+        // must never run ahead of real time while the master reopens.
+        if (restartAt > 0 && !restarted && t >= restartAt) c.restartAudio(), restarted = true;
     }
     const auto status = c.status();
     const auto recStatus = c.recorder().status();
@@ -306,7 +311,11 @@ int runE2E(const juce::StringArray& args)
         {
             auto a = readTrack(session / paths::fromUtf8(t.file));
             const double secs = a.ok ? static_cast<double>(a.frames) / a.rate : 0.0;
-            rep.check("file " + t.file, a.ok && std::abs(secs - expected) < 0.5, fmt(secs, 2) + " s (expected " + fmt(expected, 1) + ")");
+            // A restart pauses the tick while devices reopen (shorter files); running ahead of real
+            // time (longer files) is never acceptable.
+            const double minSecs = expected - (restarted ? 1.5 : 0.5);
+            rep.check("file " + t.file, a.ok && secs > minSecs && secs < expected + 0.25,
+                      fmt(secs, 2) + " s (expected " + fmt(expected, 1) + (restarted ? ", audio restarted once" : "") + ")");
             tracks[t.name] = std::move(a);
         }
     const int mid = static_cast<int>((5.0 + 8.0) * rate); // inside the live part, after the talkback press
@@ -381,8 +390,11 @@ int runE2E(const juce::StringArray& args)
             rep.check("VB-Cable loopback level", std::abs(toDb(a) - expectDb) < 1.0,
                       fmt(toDb(a), 2) + " dBFS (expected " + fmt(expectDb, 2) + "; Windows volume CABLE Input " + (vIn ? fmt(*vIn, 2) + " dB" : "?") +
                           ", CABLE Output " + (vOut ? fmt(*vOut, 2) + " dB" : "?") + ")");
-            const int tb = static_cast<int>((5.0 + 4.5) * rate);
-            const double t = toneAmplitude(it->second.left.data() + tb, rate, kTalkbackHz, rate);
+            // Short windows (~4 Hz wide): while a device is still converging its drift correction
+            // (up to 1000 ppm, i.e. +-2.5 Hz at 2.5 kHz) a 1 s window would miss the tone.
+            double t = 0.0;
+            for (double at = 4.5; at < 5.5; at += 0.25)
+                t = std::max(t, toneAmplitude(it->second.left.data() + static_cast<int>((5.0 + at) * rate), rate / 4, kTalkbackHz, rate));
             rep.check("talkback reaches its target headphones", toDb(t) > expectDb - 10.0, fmt(toDb(t)) + " dBFS on HP8 (via loopback)");
         }
     }

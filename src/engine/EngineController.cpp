@@ -593,6 +593,12 @@ void EngineController::talkbackRelease()
     engine_.routing().talkbackActive = talkbackKey_.active();
 }
 
+void EngineController::talkbackCancelHold()
+{
+    talkbackKey_.cancelHold();
+    engine_.routing().talkbackActive = talkbackKey_.active();
+}
+
 void EngineController::applyAssignments(const Assignments& a)
 {
     post([this, a] {

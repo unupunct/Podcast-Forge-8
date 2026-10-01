@@ -192,7 +192,11 @@ void ProjectController::newProject()
                                }
                                juce::String e;
                                if (!openDir(*dir, e))
+                               {
+                                   // The current project stays open: keep its carts.
                                    juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "Project not opened", e);
+                                   return;
+                               }
                                // Clear what the new project does not carry over.
                                auto& sb = controller_.engine().soundboard();
                                for (int i = 0; i < kCartCount; ++i)

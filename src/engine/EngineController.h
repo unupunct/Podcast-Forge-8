@@ -144,6 +144,7 @@ public:
     // Talkback key (UI thread: the TALK button and hotkeys). Drives RoutingParams::talkbackActive.
     void talkbackPress();
     void talkbackRelease();
+    void talkbackCancelHold(); // focus lost mid-press: end it without latching
     TalkbackKey& talkbackKey() noexcept { return talkbackKey_; }
     EngineMeters meters() const noexcept { return engine_.meters(); }
     Assignments assignments() const;

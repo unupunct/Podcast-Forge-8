@@ -54,7 +54,7 @@ private:
     std::vector<Binding> cartBindings() const;
     void installHooks();
     void removeHooks();
-    KeyChord chordFor(int vk) const;
+    KeyChord chordFor(int vk, bool global = false) const;
 
     EngineController& controller_;
     SettingsDb* db_;

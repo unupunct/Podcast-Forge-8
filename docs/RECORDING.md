@@ -84,6 +84,16 @@ banner with the count. Live audio is never affected.
   unwritten buffer, raises a modal non-blocking alert, retries every second, and after 10 s offers
   "Continue recording to another folder" which opens new files (`_part2`) there. Existing files are
   finalised (header patched to what was written) — never deleted.
+- Continue-elsewhere is all-or-nothing: every new file is created first; only when all exist is the
+  held audio moved into them and the old files closed. If any cannot be created, nothing changes
+  and the audio stays in memory (tested with a "full" target drive).
+- Stop / quit while the disk still refuses writes: after a final flush attempt, any audio still
+  held is written into a `_part2` session under `%LOCALAPPDATA%\PodcastForge8\Rescue\` (normally the
+  system drive) and the user is told where; the Stop dialog says so beforehand. Never discarded.
+- FLAC: an encoder stream cannot resume after a failed write, so from then on the track holds its
+  audio in memory (counted like WAV's pending bytes) until it continues elsewhere or is rescued.
+- WAV after a torn frame (the disk filled mid-frame): later flushes realign to the file's frame
+  boundary, so the error clears as soon as space returns and header checkpoints resume.
 
 ## 7. Pre-roll
 

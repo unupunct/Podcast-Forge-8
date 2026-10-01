@@ -77,6 +77,13 @@ HotkeyManager::HotkeyManager(EngineController& controller, SettingsDb* db, Trans
             if (auto v = json::parse(*text)) config_ = HotkeyConfig::fromJson(*v);
     focused_.onAction = [this](HotkeyAction a, bool down) { handle(a, down); };
     global_.onAction = [this](HotkeyAction a, bool down) { handle(a, down); };
+    // A hold that ends without its real key-up: talkback ends without the tap-to-latch rule.
+    auto cancel = [this](HotkeyAction a) {
+        if (a == HotkeyAction::Talkback) controller_.talkbackCancelHold();
+        else handle(a, false);
+    };
+    focused_.onCancel = cancel;
+    global_.onCancel = cancel;
     gInstance = this;
     installHooks();
     rebuild();
@@ -186,13 +193,16 @@ void HotkeyManager::rebuild()
     for (const auto& e : regErrors_) PF8_LOG_WARN("hotkeys", "%s", e.c_str());
 }
 
-KeyChord HotkeyManager::chordFor(int vk) const
+KeyChord HotkeyManager::chordFor(int vk, bool global) const
 {
+    // Focused keys: GetKeyState matches the message being processed. Global (low-level hook) keys
+    // are typed into another app, so this thread's key state says nothing: use the live state.
+    auto down = [global](int k) { return ((global ? GetAsyncKeyState(k) : GetKeyState(k)) & 0x8000) != 0; };
     KeyChord c;
     c.vk = vk;
-    c.ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
-    c.shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-    c.alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
+    c.ctrl = down(VK_CONTROL);
+    c.shift = down(VK_SHIFT);
+    c.alt = down(VK_MENU);
     return c;
 }
 
@@ -219,7 +229,7 @@ void HotkeyManager::onGlobalHotkey(int id)
 void HotkeyManager::onGlobalKey(int vk, bool down)
 {
     if (isModifier(vk)) return;
-    if (down) global_.keyDown(chordFor(vk));
+    if (down) global_.keyDown(chordFor(vk, true));
     else global_.keyUp(vk);
 }
 
@@ -277,6 +287,11 @@ void HotkeyManager::timerCallback()
     if (wasForeground_ && !fg) focused_.releaseAll();
     if (!wasForeground_ && fg) global_.releaseAll();
     wasForeground_ = fg;
+    // A hold whose key-up went elsewhere (focus switched away and back between two ticks, a
+    // dialog swallowed it): if the key is physically up, end the hold.
+    for (auto* d : {&focused_, &global_})
+        for (int vk : d->heldKeys())
+            if ((GetAsyncKeyState(vk) & 0x8000) == 0) d->cancelKey(vk);
     // Cart hotkeys are edited on the soundboard: pick up changes.
     std::string keys;
     for (int i = 0; i < kCartCount; ++i) keys += controller_.engine().soundboard().settings(i).hotkey + "\n";

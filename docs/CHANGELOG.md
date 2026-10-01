@@ -329,3 +329,43 @@
 - Gate: 111 tests, 128 UI screens; live tests 3/3; `--e2e --seconds=60` on the real devices: PASS.
 - Installer: silent per-user install, installed exe runs, silent uninstall removes the program and
   its uninstall entry while Settings.db and the logs stay.
+## Final review (2026-10-01)
+
+Two independent audits (real-time / threading, data safety / UI flows) of the whole code base;
+every finding was checked against the code, fixed where real, and covered by a regression test that
+was shown to fail on the old code where practical.
+
+**Fixed - real-time and threading**
+- A newly opened master (hotplug, reassignment, watchdog restart) could tick the engine about 3x
+  (outputs) or up to 64x (inputs) faster than real time until the graph contained its bridge: a
+  recording would get time-compressed garbage. Bridges are now "attached" by the tick; an unattached
+  master drives at its nominal rate; the internal clock stops before a new master opens and the
+  master joins the graph immediately. Verified on real devices with an audio restart in the middle
+  of an e2e recording (files exactly real-time length).
+- Ring pushes are whole frames only (an overrun on 3/6/10-channel devices rotated channels).
+- Devices with more than 32 channels are refused (they overflowed the per-bridge buffers).
+- Soundboard buffers are reclaimed by render epoch (use-after-free window when a cart was replaced).
+- Graph publishing never waits for the tick (a stalled device could freeze the control thread with
+  the state lock held); the internal-clock flag is atomic (status() raced on it).
+- Music: the decoder re-validates the playlist after opening a file (out-of-bounds write when a
+  track was removed meanwhile) and never drops input for files below ~24 kHz (audible skips).
+- Shutdown can no longer reopen devices from a queued hotplug job; a stream stuck in a driver call
+  is abandoned after 3 s instead of hanging the restart; SeqLock without a shared fallback copy;
+  exact record-tap handshake at stop instead of a 30 ms sleep.
+
+**Fixed - data safety and UI**
+- Continue-elsewhere is all-or-nothing (a failure used to destroy the held audio).
+- Stop / quit during a write error rescues the held audio to `%LOCALAPPDATA%\PodcastForge8\Rescue`
+  (it used to be discarded); the dialogs say so.
+- FLAC tracks hold their audio after a failed write (they used to drop everything after it).
+- WAV re-aligns after a torn frame (a permanent false WRITE ERROR and no more checkpoints).
+- Project.json is flushed to disk before replacing the old one, with Project.json.bak as fallback.
+- Archives: refused above 4 GB (no ZIP64), verified after writing, never appended to a stale temp
+  file.
+- Hotkeys: global hold keys read the live modifier state; hotkeys keep working while a DSP editor or
+  mic wizard is open (now non-modal windows); a forced release never latches talkback; a hold whose
+  key-up went to another app is released; New Project keeps the carts if it fails.
+- e2e: an audio restart mid-recording; loopback tone checks tolerant of drift convergence.
+
+**Verified**
+- 119 tests, 128 UI screens, live tests 3/3, `--e2e --seconds=60` twice: PASS, no warnings.

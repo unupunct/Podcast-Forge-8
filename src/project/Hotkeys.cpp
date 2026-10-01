@@ -291,7 +291,25 @@ void HotkeyDispatcher::releaseAll()
     held_.clear();
     down_.clear();
     for (const auto& [vk, a] : held)
-        if (onAction) onAction(a, false);
+    {
+        if (onCancel) onCancel(a);
+        else if (onAction) onAction(a, false);
+    }
+}
+
+void HotkeyDispatcher::cancelKey(int vk)
+{
+    down_.erase(std::remove(down_.begin(), down_.end(), vk), down_.end());
+    for (auto it = held_.begin(); it != held_.end();)
+        if (it->first == vk)
+        {
+            const auto a = it->second;
+            it = held_.erase(it);
+            if (onCancel) onCancel(a);
+            else if (onAction) onAction(a, false);
+        }
+        else
+            ++it;
 }
 
 } // namespace pf8
