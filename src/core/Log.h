@@ -23,6 +23,8 @@ struct Config
 void start(const Config& config);
 void stop(); // drains the queue and closes the file; safe to call when not started
 bool isRunning() noexcept;
+void setMinLevel(Level level) noexcept; // takes effect immediately
+Level minLevel() noexcept;
 
 void write(Level level, const char* category, const char* fmt, ...) noexcept;
 

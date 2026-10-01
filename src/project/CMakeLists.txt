@@ -2,6 +2,7 @@ add_library(pf8_project STATIC
     ProjectState.cpp
     Project.cpp
     Hotkeys.cpp
+    AppSettings.cpp
 )
 target_link_libraries(pf8_project PUBLIC pf8_engine pf8_media pf8_core PRIVATE pf8_juce)
 target_include_directories(pf8_project PUBLIC ${PROJECT_SOURCE_DIR}/src)

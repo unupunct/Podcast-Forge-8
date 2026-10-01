@@ -9,6 +9,7 @@
 #include "core/Paths.h"
 #include "core/SettingsDb.h"
 #include "engine/EngineController.h"
+#include "project/AppSettings.h"
 #include "ui/MainWindow.h"
 #include "ui/VerifyUi.h"
 
@@ -56,7 +57,15 @@ public:
         std::string dbError;
         if (!settings_.open(paths::settingsDb(), &dbError))
             PF8_LOG_ERROR("app", "settings unavailable (%s); assignments will not persist", dbError.c_str());
-        controller_ = std::make_unique<EngineController>(EngineController::Settings{}, settings_.isOpen() ? &settings_ : nullptr);
+        const auto app = AppSettings::load(settings_.isOpen() ? &settings_ : nullptr);
+        if (app.debugLog) log::setMinLevel(log::Level::Debug);
+        if (app.uiScale != 1.0) juce::Desktop::getInstance().setGlobalScaleFactor(static_cast<float>(app.uiScale));
+        EngineController::Settings es;
+        es.sampleRate = app.sampleRate;
+        es.blockFrames = app.blockFrames;
+        es.mode = app.mode;
+        PF8_LOG_INFO("app", "engine rate=%d block=%d mode=%d", es.sampleRate, es.blockFrames, static_cast<int>(es.mode));
+        controller_ = std::make_unique<EngineController>(es, settings_.isOpen() ? &settings_ : nullptr);
         controller_->start();
         window_ = std::make_unique<ui::MainWindow>(getApplicationName(), *controller_);
     }

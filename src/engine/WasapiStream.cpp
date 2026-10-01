@@ -319,7 +319,8 @@ bool WasapiStream::open(std::string& error)
                 UINT32 def = 0, fund = 0, mn = 0, mx = 0;
                 if (SUCCEEDED(c3->GetSharedModeEnginePeriod(mix, &def, &fund, &mn, &mx)) && fund > 0)
                 {
-                    UINT32 want = static_cast<UINT32>(config_.requestedFrames) * mixRate / 48000;
+                    const UINT32 engineRate = config_.requestedRate > 0 ? static_cast<UINT32>(config_.requestedRate) : 48000u;
+                    UINT32 want = static_cast<UINT32>(config_.requestedFrames) * mixRate / engineRate;
                     UINT32 period = ((want + fund - 1) / fund) * fund;
                     period = period < mn ? mn : (period > mx ? mx : period);
                     h = c3->InitializeSharedAudioStream(AUDCLNT_STREAMFLAGS_EVENTCALLBACK, period, mix, nullptr);

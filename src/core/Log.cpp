@@ -119,6 +119,8 @@ public:
     }
 
     bool running() const noexcept { return running_.load(); }
+    void setMinLevel(Level l) noexcept { minLevel_.store(l); }
+    Level minLevel() const noexcept { return minLevel_.load(); }
 
     void push(Level level, const char* category, const char* fmt, va_list args) noexcept
     {
@@ -278,6 +280,8 @@ Logger& logger()
 void start(const Config& config) { logger().start(config); }
 void stop() { logger().stop(); }
 bool isRunning() noexcept { return logger().running(); }
+void setMinLevel(Level level) noexcept { logger().setMinLevel(level); }
+Level minLevel() noexcept { return logger().minLevel(); }
 
 void write(Level level, const char* category, const char* fmt, ...) noexcept
 {

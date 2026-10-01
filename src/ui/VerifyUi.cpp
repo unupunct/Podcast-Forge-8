@@ -8,6 +8,7 @@
 #include "ui/DspEditor.h"
 #include "ui/MasterStripView.h"
 #include "ui/MicWizard.h"
+#include "ui/SettingsView.h"
 #include "ui/Widgets.h"
 
 namespace pf8::ui {
@@ -178,13 +179,23 @@ VerifyUiResult runVerifyUi(EngineController& controller, const std::filesystem::
             const int cw = juce::jmax(1280, lw - 16), chh = juce::jmax(720, lh - 90);
             main.setSize(cw, chh);
             // Main tabs, plus every bottom-dock tab of the mixer page.
-            struct View { int tab, dock; const char* name; };
+            struct View { int tab, dock; const char* name; int page = -1; };
             // Every main tab (named after its title), then the mixer page's other dock tabs.
             std::vector<View> views = {{0, 0, "mixer"}};
             std::vector<std::string> tabNames;
             for (int t = 1; t < main.tabs().getNumTabs(); ++t)
                 tabNames.push_back(main.tabs().getTabNames()[t].toLowerCase().replaceCharacter(' ', '-').toStdString());
-            for (int t = 1; t < main.tabs().getNumTabs(); ++t) views.push_back({t, -1, tabNames[static_cast<size_t>(t - 1)].c_str()});
+            std::vector<std::string> pageNames;
+            for (int t = 1; t < main.tabs().getNumTabs(); ++t)
+            {
+                views.push_back({t, -1, tabNames[static_cast<size_t>(t - 1)].c_str()});
+                if (auto* sv = dynamic_cast<SettingsView*>(main.tabs().getTabContentComponent(t)))
+                {
+                    pageNames.reserve(static_cast<size_t>(sv->pageCount()));
+                    for (int pg = 1; pg < sv->pageCount(); ++pg) pageNames.push_back("settings-" + std::to_string(pg + 1));
+                    for (int pg = 1; pg < sv->pageCount(); ++pg) views.push_back({t, -1, pageNames[static_cast<size_t>(pg - 1)].c_str(), pg});
+                }
+            }
             if (auto* page = dynamic_cast<MixerPage*>(main.tabs().getTabContentComponent(0)))
                 for (int d = 1; d < page->dock().getNumTabs(); ++d)
                     views.push_back({0, d, nullptr});
@@ -192,6 +203,7 @@ VerifyUiResult runVerifyUi(EngineController& controller, const std::filesystem::
             {
                 const int tab = views[vi].tab;
                 main.tabs().setCurrentTabIndex(tab, false);
+                if (auto* sv = dynamic_cast<SettingsView*>(main.tabs().getTabContentComponent(tab))) sv->showPage(std::max(0, views[vi].page));
                 std::string viewName = views[vi].name ? views[vi].name : "";
                 if (auto* page = dynamic_cast<MixerPage*>(main.tabs().getTabContentComponent(0)); page && views[vi].dock >= 0)
                 {

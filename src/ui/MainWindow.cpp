@@ -93,6 +93,7 @@ MainComponent::MainComponent(EngineController& controller)
     tabs_.addTab("DEVICE MATRIX", colours::background, new DeviceMatrixView(controller), true);
     tabs_.addTab("DEVICES", colours::background, new DeviceListView(controller), true);
     tabs_.addTab("DIAGNOSTICS", colours::background, new DiagnosticsView(controller), true);
+    tabs_.addTab("SETTINGS", colours::background, new SettingsView(controller), true);
     addAndMakeVisible(tabs_);
     setSize(1600, 900);
 }
@@ -168,6 +169,10 @@ MainWindow::MainWindow(const juce::String& title, EngineController& controller)
         t.marker = [main] { main->transport().marker(); };
         t.idle = [&controller] { return controller.recorder().state() == Recorder::State::Idle; };
         hotkeys_ = std::make_unique<HotkeyManager>(controller, controller.settingsDb(), std::move(t));
+        for (int i = 0; i < main->tabs().getNumTabs(); ++i)
+            if (auto* sv = dynamic_cast<SettingsView*>(main->tabs().getTabContentComponent(i)))
+                sv->setHotkeyAccess({[this] { return hotkeys_->config(); }, [this](const HotkeyConfig& c) { hotkeys_->setConfig(c); },
+                                     [this] { return hotkeys_->registrationErrors(); }});
     }
     const auto note = project_->startup();
     project_->onChanged();
