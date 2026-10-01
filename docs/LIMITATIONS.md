@@ -60,13 +60,25 @@ Maintained as each stage lands. Windows-specific constraints first.
   encoder state is lost; recording continues into a new `_part2` file. WAV/BWF keep every sample.
 - Recovery rebuilds WAV/BWF/RF64 headers from the real file length; markers of an interrupted session
   are in `Metadata/Markers.json` (the cue chunk is only written when a recording stops normally).
-- The System (loopback) and Remote tracks are reserved: they record silence until their sources
-  exist (later stages).
+- Version 1.0 records CH1–CH8, the Main mix and (optionally) the music. A System-audio (WASAPI
+  loopback) track and a dedicated Remote-guest input are designed in (track ids, routing source)
+  but not available yet: a remote guest is recorded today by assigning the call app's output
+  (e.g. via VB-Cable) as a channel mic.
 
 ## ASIO
 
-- Optional build (`PF8_ASIO_SDK_DIR`); the SDK is not redistributable. ASIO opens **one** driver at
-  a time, so it helps only with a single multi-channel interface, not with 8 separate USB devices.
+- **Not in version 1.0.** The build option `PF8_ASIO_SDK_DIR` is reserved but no ASIO backend is
+  compiled: the Steinberg SDK is not redistributable and this release could not be tested against
+  an ASIO driver. All devices run on WASAPI (shared, low-latency shared or exclusive). Note that ASIO
+  opens **one** driver at a time, so it would help only with a single multi-channel interface,
+  never with 8 separate USB devices — which is what WASAPI plus drift correction is for.
+
+## Installer
+
+- The installer and the exe are **not code-signed**: Windows SmartScreen may show "Windows protected
+  your PC" on first run (More info → Run anyway). SHA-256 checksums are published with each release.
+- Per-user install by default (no administrator rights). Uninstalling removes only the program;
+  projects (`Documents\PodcastForge8`), settings and logs (`%LOCALAPPDATA%\PodcastForge8`) stay.
 
 ## Virtual audio devices
 

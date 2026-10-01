@@ -313,3 +313,19 @@
 - 111 tests (watchdog verdicts and rate limit, AppSettings round trip and rejects, 2-channel
   drifting input level, custom headphone pan level); 128 UI screens; `--e2e --seconds=30` on the
   real devices (Logitech BRIO + VB-Cable loop): all checks PASS, no warnings.
+## Stage 14 - Installer, documentation, 1.0.0 (2026-10-01)
+
+**Added**
+- Inno Setup 6 installer (`installer/PodcastForge8.iss`): per-user by default (no admin), x64,
+  Windows 10 1809+, AGPLv3 licence page, closes a running copy first, optional desktop icon;
+  uninstall removes only the program - never projects, recordings, settings or logs.
+- `scripts/package.ps1`: full gate, version check of the exe, installer and portable zip with SHA-256.
+- Application icon (`scripts/make-icon.py`, dependency-free) and Windows version resource.
+- README rewritten for 1.0; `docs/OBS.md` (OBS, Discord / Zoom, mix-minus for remote guests);
+  LIMITATIONS updated (ASIO not in 1.0, reserved System / Remote tracks, unsigned installer).
+- Version 1.0.0.
+
+**Verified**
+- Gate: 111 tests, 128 UI screens; live tests 3/3; `--e2e --seconds=60` on the real devices: PASS.
+- Installer: silent per-user install, installed exe runs, silent uninstall removes the program and
+  its uninstall entry while Settings.db and the logs stay.
