@@ -18,8 +18,16 @@ Maintained as each stage lands. Windows-specific constraints first.
 - **The master device** drives the engine. Its own path adds at most one engine block. If it is
   unplugged, the next device takes over; the old and new master streams reopen (a short dropout on
   those two devices only). With no device at all the engine runs on an internal timer.
-- **Drift correction starts smoothly but takes 10–20 s to lock** after a device opens. During that
-  time the pitch correction can briefly reach a few hundred ppm (well under 1 cent — inaudible).
+- **Drift correction takes 20–25 s to lock** after a device opens. During that time the correction
+  can briefly reach up to 1000 ppm (1.7 cents — not noticeable on speech).
+- **Sample alignment between different devices is not sample-exact.** Windows offers no clean
+  per-sample hardware timestamps for USB audio (measured: WASAPI packet stamps wobble by up to
+  ±15 ms), so each device's timeline is estimated from its callback times with a DLL. The mean
+  alignment never drifts; it wanders by ≈ 2–3 samples (≈ 50 µs) with normal callback jitter and
+  more when the system is heavily loaded. For multitrack editing this is far below anything audible
+  (50 µs ≈ 1.7 cm of sound travel). Channels on the *same* device are always sample-exact.
+- **Virtual devices make poor master clocks.** VB-Cable's timing is jittery (the live tests use it as
+  master and still lock, but with more residual correction noise than a USB headset would give).
 
 ## Device identity
 
@@ -29,6 +37,15 @@ Maintained as each stage lands. Windows-specific constraints first.
   for a one-click confirmation instead of guessing.
 - The serial of composite devices (webcams, headsets with HID buttons) is read from the parent USB
   device node.
+
+## Recording
+
+- **FLAC and a full disk:** if the disk refuses a write in the middle of a FLAC frame, that frame's
+  encoder state is lost; recording continues into a new `_part2` file. WAV/BWF keep every sample.
+- Recovery rebuilds WAV/BWF/RF64 headers from the real file length; markers of an interrupted session
+  are in `Metadata/Markers.json` (the cue chunk is only written when a recording stops normally).
+- The System (loopback) and Remote tracks are reserved: they record silence until their sources
+  exist (later stages).
 
 ## ASIO
 

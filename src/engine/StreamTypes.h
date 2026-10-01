@@ -48,6 +48,10 @@ class TickClient
 public:
     virtual ~TickClient() = default;
     virtual void tick(int numFrames) noexcept = 0;
+    // Master bridges call this before each tick with the hardware-clock time (monotonic ns) of the
+    // audio that tick produces/consumes, so the engine's notion of "now" follows the master's
+    // crystal instead of thread-scheduling time.
+    virtual void setTickTimeNs(int64_t) noexcept {}
 };
 
 const char* toString(StreamMode m) noexcept;

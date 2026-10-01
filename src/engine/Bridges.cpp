@@ -1,5 +1,7 @@
 #include "engine/Bridges.h"
 
+#include "engine/DriftController.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -37,6 +39,10 @@ BridgeStats BridgeCounters::read() const noexcept
     s.status = status_.load(std::memory_order_relaxed);
     s.timestampAgeMs = tsAgeMs_.load(std::memory_order_relaxed);
     s.deviceFrames = deviceFrames_.load(std::memory_order_relaxed);
+    s.recentres = recentres_.load(std::memory_order_relaxed);
+    s.measuredNow = measuredNow_.load(std::memory_order_relaxed);
+    s.ringNow = ringNow_.load(std::memory_order_relaxed);
+    s.clockOffsetUs = clockOffsetUs_.load(std::memory_order_relaxed);
     return s;
 }
 
@@ -62,7 +68,7 @@ InputBridge::InputBridge(const BridgeConfig& config)
     status_ = cfg_.master ? SyncStatus::Native : SyncStatus::Priming;
 }
 
-void InputBridge::deviceWrite(const float* interleaved, int frames, int64_t firstFrameNs) noexcept
+void InputBridge::deviceWrite(const float* interleaved, int frames, int64_t callbackNs) noexcept
 {
     const size_t samples = static_cast<size_t>(frames) * static_cast<size_t>(cfg_.deviceChannels);
     const size_t written = ring_.push(interleaved, samples);
@@ -71,17 +77,22 @@ void InputBridge::deviceWrite(const float* interleaved, int frames, int64_t firs
         overruns_.fetch_add(1, std::memory_order_relaxed);
         dropped_.fetch_add((samples - written) / static_cast<size_t>(cfg_.deviceChannels), std::memory_order_relaxed);
     }
-    lastEndNs_.store(firstFrameNs + static_cast<int64_t>(1e9 * frames / cfg_.deviceRate), std::memory_order_release);
+    if (!dll_.started()) dll_.reset(cfg_.deviceRate, cfg_.devicePeriod, DriftController::tuning().dllBandwidthHz);
+    // The filtered callback time stands for "the device has produced everything delivered so far".
+    lastEndNs_.store(dll_.update(callbackNs, frames), std::memory_order_release);
     deviceFrames_.fetch_add(static_cast<uint64_t>(frames), std::memory_order_relaxed);
 }
 
-void InputBridge::driveEngine(TickClient& engine) noexcept
+void InputBridge::driveEngine(TickClient& engine, int64_t) noexcept
 {
+    // deviceWrite() just updated this device's DLL: that filtered time is the engine's "now".
+    const int64_t engineNow = lastEndNs_.load(std::memory_order_acquire);
     // Only valid for a master bridge: the engine side runs on this (device) thread.
     for (int guard = 0; guard < 64; ++guard)
     {
         const int need = rs_.inputFramesNeeded(cfg_.engineBlock);
         if (static_cast<int>(readableDeviceFrames()) < need) break;
+        if (engineNow != 0) engine.setTickTimeNs(engineNow);
         engine.tick(cfg_.engineBlock);
     }
 }
@@ -134,6 +145,7 @@ void InputBridge::engineRead(float* const* perChannel, int frames, int64_t nowNs
             rs_.reset();
             fadeRemaining_ = fadeLength_;
             dc_.reset(dc_.ppm());
+            settleFramesLeft_ = static_cast<int64_t>(kSettleSeconds * cfg_.engineRate);
             if (!cfg_.master) status_ = SyncStatus::Converging;
         }
         else
@@ -152,6 +164,15 @@ void InputBridge::engineRead(float* const* perChannel, int frames, int64_t nowNs
         overruns_.fetch_add(1, std::memory_order_relaxed);
         dropped_.fetch_add(excess / static_cast<size_t>(ch), std::memory_order_relaxed);
         dc_.reset(dc_.ppm());
+    }
+
+    if (silenceFrames_ > 0)
+    {
+        // Re-centre deficit: hold back device audio for a few ms so the ring refills (fades back in).
+        silenceFrames_ = std::max(0, silenceFrames_ - frames);
+        outputSilence(perChannel, frames);
+        if (silenceFrames_ == 0) fadeRemaining_ = fadeLength_;
+        return;
     }
 
     const int need = rs_.inputFramesNeeded(frames);
@@ -189,10 +210,29 @@ void InputBridge::engineRead(float* const* perChannel, int frames, int64_t nowNs
             perChannel[c][i] = i < produced ? resampled_[static_cast<size_t>(i) * ch + c] * g : 0.0f;
     }
 
+    measuredNow_.store(measured, std::memory_order_relaxed);
+    ringNow_.store(static_cast<double>(avail), std::memory_order_relaxed);
     if (!cfg_.master)
     {
         const double ppm = dc_.update(measured, deviceFramesFor(frames, cfg_));
-        rs_.setRatioCorrectionPpm(ppm);
+        if (settleFramesLeft_ > 0 && (settleFramesLeft_ -= frames) <= 0)
+        {
+            const double e = dc_.averagedFill() - target_;
+            if (std::abs(e) > cfg_.devicePeriod / 4.0)
+            {
+                if (e > 0)
+                {
+                    const size_t drop = std::min(static_cast<size_t>(e), readableDeviceFrames());
+                    ring_.discard(drop * static_cast<size_t>(ch));
+                    fadeRemaining_ = fadeLength_;
+                }
+                else
+                    silenceFrames_ = deviceFramesFor(static_cast<int>(-e), cfg_);
+                dc_.reset(0.0);
+                recentres_.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+        rs_.setRatioCorrectionPpm(dc_.ppm());
         ppm_.store(ppm, std::memory_order_relaxed);
         fill_.store(dc_.averagedFill(), std::memory_order_relaxed);
         status_.store(dc_.status(), std::memory_order_relaxed);
@@ -255,8 +295,14 @@ void OutputBridge::engineCommit(int frames, int64_t nowNs) noexcept
         else
             for (int c = 0; c < devCh; ++c) dst[c] = (c / 2 < pairs_) ? src[c] : 0.0f;
     }
-    const size_t samples = static_cast<size_t>(produced) * devCh;
-    const size_t written = ring_.push(deviceFrames_.data(), samples);
+    size_t offsetFrames = 0;
+    if (skipFrames_ > 0)
+    {
+        offsetFrames = static_cast<size_t>(std::min<int64_t>(skipFrames_, produced));
+        skipFrames_ -= static_cast<int64_t>(offsetFrames);
+    }
+    const size_t samples = (static_cast<size_t>(produced) - offsetFrames) * devCh;
+    const size_t written = ring_.push(deviceFrames_.data() + offsetFrames * devCh, samples);
     totalWritten_ += written / static_cast<size_t>(devCh);
     if (written < samples)
     {
@@ -270,6 +316,7 @@ void OutputBridge::engineCommit(int frames, int64_t nowNs) noexcept
         {
             status_.store(SyncStatus::Priming, std::memory_order_relaxed);
             fill_.store(static_cast<double>(readableDeviceFrames()), std::memory_order_relaxed);
+            settleFramesLeft_ = static_cast<int64_t>(kSettleSeconds * cfg_.engineRate);
             return;
         }
         // Linearised fill against hardware playback: frames written minus frames the device has
@@ -281,7 +328,32 @@ void OutputBridge::engineCommit(int frames, int64_t nowNs) noexcept
         const double consumed = static_cast<double>(rp.ringRead) + elapsed * cfg_.deviceRate;
         const double measured = static_cast<double>(totalWritten_) - consumed;
         const double ppm = dc_.update(measured, deviceFramesFor(frames, cfg_));
-        rs_.setRatioCorrectionPpm(ppm);
+        if (settleFramesLeft_ > 0 && (settleFramesLeft_ -= frames) <= 0)
+        {
+            const double e = dc_.averagedFill() - target_;
+            if (std::abs(e) > cfg_.devicePeriod / 4.0)
+            {
+                if (e > 0) skipFrames_ = static_cast<int64_t>(e); // produce less for a moment
+                else
+                {
+                    // Deficit: insert silence frames into the ring.
+                    const size_t n = static_cast<size_t>(-e) * static_cast<size_t>(devCh);
+                    std::fill(deviceFrames_.begin(), deviceFrames_.end(), 0.0f);
+                    size_t left = n;
+                    while (left > 0)
+                    {
+                        const size_t c = std::min(left, deviceFrames_.size());
+                        const size_t w = ring_.push(deviceFrames_.data(), c);
+                        totalWritten_ += w / static_cast<size_t>(devCh);
+                        if (w < c) break;
+                        left -= c;
+                    }
+                }
+                dc_.reset(0.0);
+                recentres_.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+        rs_.setRatioCorrectionPpm(dc_.ppm());
         ppm_.store(ppm, std::memory_order_relaxed);
         fill_.store(dc_.averagedFill(), std::memory_order_relaxed);
         status_.store(dc_.status(), std::memory_order_relaxed);
@@ -292,14 +364,23 @@ void OutputBridge::engineCommit(int frames, int64_t nowNs) noexcept
     }
 }
 
-void OutputBridge::deviceRead(float* interleaved, int frames, int64_t nowNs, TickClient* driver, int64_t packetStartNs) noexcept
+void OutputBridge::deviceRead(float* interleaved, int frames, int64_t nowNs, TickClient* driver) noexcept
 {
     const int devCh = cfg_.deviceChannels;
+    if (!dll_.started()) dll_.reset(cfg_.deviceRate, cfg_.devicePeriod, DriftController::tuning().dllBandwidthHz);
+    const int64_t deviceNow = dll_.update(nowNs, frames);
     if (driver)
     {
+        // Every tick of this burst happens "now" on the master's clock: the DLL removes the
+        // callback scheduling jitter while following the master's true rate.
+        const int64_t engineNow = deviceNow;
+        clockOffsetUs_.store(static_cast<double>(engineNow - nowNs) * 1e-3, std::memory_order_relaxed);
         const int maxTicks = frames / std::max(1, deviceFramesFor(cfg_.engineBlock, cfg_)) + 8;
         for (int t = 0; t < maxTicks && static_cast<int>(readableDeviceFrames()) < frames; ++t)
+        {
+            driver->setTickTimeNs(engineNow);
             driver->tick(cfg_.engineBlock);
+        }
     }
 
     if (devicePriming_.load(std::memory_order_relaxed))
@@ -307,8 +388,7 @@ void OutputBridge::deviceRead(float* interleaved, int frames, int64_t nowNs, Tic
         // Same measure the engine side regulates: ring plus what the device still holds ahead of
         // playback (packetStart lies in the future by the device's own buffering).
         const double avail = static_cast<double>(readableDeviceFrames());
-        const double ahead = packetStartNs != 0 ? static_cast<double>(packetStartNs - nowNs) * 1e-9 * cfg_.deviceRate : 0.0;
-        const double measured = avail + std::max(0.0, ahead);
+        const double measured = avail;
         if (avail >= frames && measured >= target_)
         {
             // Start centred on the target (see InputBridge): drop excess queued while priming.
@@ -332,7 +412,7 @@ void OutputBridge::deviceRead(float* interleaved, int frames, int64_t nowNs, Tic
         }
     }
 
-    readPos_.write(ReadPos{totalRead_, packetStartNs != 0 ? packetStartNs : nowNs});
+    readPos_.write(ReadPos{totalRead_, deviceNow});
     const size_t want = static_cast<size_t>(frames) * devCh;
     const size_t got = ring_.pop(interleaved, want);
     totalRead_ += got / static_cast<size_t>(devCh);

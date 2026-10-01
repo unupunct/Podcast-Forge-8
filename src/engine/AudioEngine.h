@@ -93,6 +93,7 @@ public:
     RecordTap& recordTap() noexcept { return recordTap_; }
 
     void tick(int numFrames) noexcept override;
+    void setTickTimeNs(int64_t t) noexcept override { tickTimeNs_ = t; }
 
 private:
     void applyPendingGraph() noexcept;
@@ -122,6 +123,7 @@ private:
     int64_t peakWindowFrames_ = 0;
     std::atomic<uint64_t> skipped_{0};
     std::atomic<EngineTap*> tap_{nullptr};
+    int64_t tickTimeNs_ = 0; // set by a master bridge right before tick(); 0 = use the clock
     RoutingEngine routing_;
     std::array<ChannelDspParams, kNumChannels> dsp_;
     MasterDspParams masterDsp_;

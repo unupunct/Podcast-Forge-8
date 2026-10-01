@@ -149,6 +149,12 @@ double EngineHarness::callbackTime(Device& d)
 void EngineHarness::fire(Device& d)
 {
     const int64_t nowNs = static_cast<int64_t>(nowSec_ * 1e9);
+    if (d.spec.timestampNoiseUs > 0)
+    {
+        std::uniform_real_distribution<double> step(-0.3, 0.3);
+        const double lim = d.spec.timestampNoiseUs * 1e3;
+        d.tsError = std::clamp(d.tsError + step(d.rng) * lim, -lim, lim);
+    }
     const int n = d.spec.period;
     const int ch = d.spec.channels;
     if (d.isInput)
@@ -160,19 +166,16 @@ void EngineHarness::fire(Device& d)
             for (int c = 0; c < ch; ++c)
                 d.buffer[static_cast<size_t>(i) * ch + c] = d.spec.signal ? d.spec.signal(c, t) : 0.0f;
         }
-        const int64_t firstFrameNs = static_cast<int64_t>(1e9 * static_cast<double>(d.frames) / rate);
+        (void)rate;
         RtScope rt(rtAllocations_);
-        d.in->deviceWrite(d.buffer.data(), n, firstFrameNs);
-        if (d.spec.master) d.in->driveEngine(engine_);
+        d.in->deviceWrite(d.buffer.data(), n, nowNs + static_cast<int64_t>(d.tsError));
+        if (d.spec.master) d.in->driveEngine(engine_, nowNs);
     }
     else
     {
         {
-            const double rate = d.spec.rate * (1.0 + d.spec.ppm * 1e-6);
-            const int64_t packetStartNs =
-                static_cast<int64_t>(1e9 * static_cast<double>(d.frames + static_cast<uint64_t>(n)) / rate);
             RtScope rt(rtAllocations_);
-            d.out->deviceRead(d.buffer.data(), n, nowNs, d.spec.master ? &engine_ : nullptr, packetStartNs);
+            d.out->deviceRead(d.buffer.data(), n, nowNs + static_cast<int64_t>(d.tsError), d.spec.master ? &engine_ : nullptr);
         }
         if (nowSec_ >= captureFrom_)
             for (int i = 0; i < n; ++i) d.captured.push_back(d.buffer[static_cast<size_t>(i) * ch]);

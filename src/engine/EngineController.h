@@ -22,6 +22,7 @@
 #include "devices/DeviceRegistry.h"
 #include "engine/AudioEngine.h"
 #include "engine/WasapiStream.h"
+#include "record/Recorder.h"
 
 namespace pf8 {
 
@@ -98,6 +99,19 @@ public:
 
     const DeviceRegistry& registry() const noexcept { return registry_; }
     AudioEngine& engine() noexcept { return engine_; }
+
+    // Recording (UI thread). Settings other than names/arms come from recordingSettings().
+    struct RecordingSettings
+    {
+        std::filesystem::path projectDir;
+        FileFormat format = FileFormat::Wav;
+        BitDepth depth = BitDepth::Int24;
+        bool recordMain = true;
+    };
+    RecordingSettings& recordingSettings() noexcept { return recordingSettings_; }
+    Recorder::Settings recorderSettings() const; // assembled from assignments + arms + recording settings
+    bool startRecording(std::string& error);
+    Recorder& recorder() noexcept { return *recorder_; }
     ControllerStatus status() const;
     EngineMeters meters() const noexcept { return engine_.meters(); }
     Assignments assignments() const;
@@ -119,6 +133,8 @@ private:
     SettingsDb* db_;
     DeviceRegistry registry_;
     AudioEngine engine_;
+    std::unique_ptr<Recorder> recorder_;
+    RecordingSettings recordingSettings_;
     std::unique_ptr<HotplugWatcher> hotplug_;
 
     mutable std::mutex stateMutex_; // guards the members below against the UI's status() reads

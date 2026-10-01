@@ -115,11 +115,15 @@ void AudioEngine::tick(int numFrames) noexcept
     const int64_t t0 = monotonicNs();
     applyPendingGraph();
 
+    // Master hardware time when provided (jitter-free), otherwise the clock (internal clock / tests).
+    const int64_t base = tickTimeNs_ != 0 ? tickTimeNs_ : clockFn_(clockCtx_);
+    const bool hw = tickTimeNs_ != 0;
+    tickTimeNs_ = 0;
     int done = 0;
     while (done < numFrames)
     {
         const int n = std::min(kMaxBlock, numFrames - done);
-        processBlock(n, clockFn_(clockCtx_));
+        processBlock(n, hw ? base + static_cast<int64_t>(1e9 * done / sampleRate_) : clockFn_(clockCtx_));
         done += n;
     }
 

@@ -468,3 +468,25 @@ TEST_CASE("Journal JSON round trip", "[record]")
     CHECK(back->tracks[0].samplesWritten == 123456789);
     CHECK_FALSE(Journal::fromJson("{").has_value());
 }
+
+TEST_CASE("Recovery on a finalised file keeps its header (trailing cue chunks are not audio)", "[record][recovery]")
+{
+    pf8test::TempDir dir("rec-recover-final");
+    RecordTap tap;
+    Recorder rec(tap, kRate);
+    std::string err;
+    REQUIRE(rec.start(settings(dir.path(), FileFormat::Wav, BitDepth::Int24), err));
+    uint64_t frame = 0;
+    pushFrames(tap, frame, kRate * 2, tap.mask());
+    rec.addMarker("one");
+    rec.addMarker("two");
+    pushFrames(tap, frame, kRate, tap.mask());
+    rec.stop();
+    const auto main = rec.status().session / "Mix" / "MainMix.wav";
+    const auto before = readAll(main);
+    const auto r = recoverWavFile(main);
+    CHECK(r.ok);
+    CHECK(r.frames == frame);
+    const bool identical = readAll(main) == before;
+    CHECK(identical); // byte-identical: nothing to fix
+}

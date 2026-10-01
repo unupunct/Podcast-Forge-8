@@ -65,7 +65,9 @@ void TopBar::refresh()
             }
     fields_.push_back({"DEVICES", juce::String(okCount) + " / " + juce::String(assigned) + " OK  (" + juce::String(s.openStreams) + " streams)",
                        okCount < assigned ? warn : text});
-    fields_.push_back({"RECORD", juce::String::fromUTF8("\xe2\x97\x8f STOPPED"), textDim});
+    const auto rs = controller_.recorder().state();
+    fields_.push_back({"RECORD", juce::String::fromUTF8("\xe2\x97\x8f ") + toString(rs),
+                       rs == Recorder::State::Recording ? record : rs == Recorder::State::Paused ? warn : textDim});
 
     repaint();
 }

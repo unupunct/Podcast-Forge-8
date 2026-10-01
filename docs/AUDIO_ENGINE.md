@@ -37,15 +37,23 @@ Each open endpoint has one bridge between its clock and the engine clock:
   average of all. An output bridge carries one or more stereo pairs; mono devices get (L+R)/2.
 - Counters (atomics): underruns, overruns, dropped frames, ppm, averaged fill, status.
 
-**Fill measurement.** The quantity regulated is the *linearised* fill, not the raw ring count:
+**Fill measurement and time bases (revised in Stage 6 from live measurements).** The quantity
+regulated is the *linearised* fill, not the raw ring count:
 
-- input: `ring + deviceRate × (now − end of the last packet, in hardware time)`;
-- output: `framesWritten − (framesTakenAtLastPacket + deviceRate × (now − that packet's hardware start))`.
+- input: `ring + deviceRate × (engineNow − deviceTime)`;
+- output: `framesWritten − (framesTakenAtLastCallback + deviceRate × (engineNow − deviceTime))`.
 
-Using hardware timestamps (not callback times) keeps both the device's packet staircase and
-scheduler jitter out of the loop. Sampling the raw ring at engine ticks aliases the packet/block
-beat into a slow false oscillation (≈ 13 s period at 200 ppm) that a PI loop would chase —
-measured during development as ±90 ppm estimate error, gone with linearisation.
+Both times come from **delay-locked loops** (`TimeDll`, after F. Adriaensen): every bridge filters
+its device's callback times into a smooth timeline that follows that device's crystal, and the
+master bridge's DLL is the engine's `engineNow`. Raw sampling of the ring at engine ticks aliases
+the packet/burst beat into a slow false oscillation (±90 ppm error, measured in Stage 2).
+
+History, for the record: Stage 2 used the WASAPI per-packet QPC stamps/positions as "hardware
+time". A live 20 Hz trace in Stage 6 showed those stamps wobble by up to ±15 ms on the test devices
+(timestamps claiming a packet ended 14 ms *in the future*); every millisecond is ~48 frames of false
+fill error, and the loop chased it (±1000 ppm swings, 35 s to lock). DLL-filtered callback times
+fixed it: 3/3 live runs locked in 20–25 s with zero underruns. The price is a noise floor set by
+callback jitter — see "Verified".
 
 **Target fill** (device frames):
 `(3·max(P, B) + min(P, B)) / 2 + 2 ms` where P = device period and B = the engine *burst*
@@ -82,9 +90,16 @@ to 0.02 ppm per output frame (≈ 1000 ppm/s), so a correction is a glide, never
 24 input frames (0 in master passthrough). All state pre-allocated.
 
 ### DriftController
-Per non-master bridge. The linearised fill passes three cascaded one-pole filters (τ = 0.2 s each);
-error e = filtered fill − target. PI: `c = Kp·e + Ki·∫e dt` with `Kp = 2ζωn/R`, `Ki = ωn²/R`,
-ωn = 0.2 rad/s, ζ = 1 (R = device rate); clamped to ±1000 ppm with anti-windup.
+Per non-master bridge. The linearised fill passes three cascaded one-pole filters (τ = 0.2 s each,
+starting at the target); error e = filtered fill − target. PI: `c = Kp·e + Ki·∫e dt` with
+`Kp = 2ζωn/R`, `Ki = ωn²/R`, ωn = 0.15 rad/s, ζ = 1.2 (R = device rate); clamped to ±1000 ppm with
+anti-windup. Tuning chosen by a measured sweep (`tests/harness/test_harness_diag.cpp`, `[.diag]`) over
+ωn, ζ, filter τ and DLL bandwidth (0.05 Hz) under 0.5 ms and 3 ms callback jitter.
+
+**Start-up re-centring.** 1.5 s after a bridge starts, once the averaged fill has settled, a single
+correction removes any start-up offset (discard excess / insert a few ms of silence). Without it, the
+uneven first moments of WASAPI streaming left bridges hundreds of frames off target, which the loop
+can only drain at 48 frames/s at the clamp.
 
 | Status | Condition |
 |---|---|
@@ -94,16 +109,17 @@ error e = filtered fill − target. PI: `c = Kp·e + Ki·∫e dt` with `Kp = 2ζ
 | `Unstable` | clamp hit for > 2 s |
 | `Native` | master bridge (no resampling correction) |
 
-### Verified (Stage 2)
-- Harness, 10 simulated minutes, three inputs at +200 / −150 / +80 ppm (periods 480 / 441 / 128)
-  and outputs at +120 / −90 ppm, 500 µs callback jitter: estimates within 0.06 ppm, all Locked,
-  zero underruns/overruns, no discontinuities, zero allocations on the audio path.
-- Channels on three different devices (+180 / −200 / +60 ppm): arrival-time difference varies
-  by ≤ 0.15 samples over 150 s after lock; click spacing exactly 48000.00 samples.
+### Verified (current)
+- Harness, 10 simulated minutes, three inputs at +200 / −150 / +80 ppm and outputs at +120 / −90 ppm,
+  500 µs callback jitter on every device including the master: all Locked, estimates within a few
+  ppm, zero underruns/overruns, no discontinuities, zero allocations on the audio path.
+- Inter-device alignment: the mean offset between channels on different devices never drifts; with
+  500 µs callback jitter it wanders by ≈ 2.5 samples (≈ 50 µs — 1.7 cm of sound travel). Under 3 ms
+  jitter the correction noise is ≈ 75 ppm worst (0.13 cents). Both are far below audibility.
 - Hot-plug: unplugging and replugging one mic leaves every other channel **bit-identical** to an
   undisturbed run.
-- Live: Logitech BRIO mic + VB-Cable capture bridged to a VB-Cable render master, WASAPI shared:
-  Locked within 15 s, zero underruns.
+- Live (Logitech BRIO + VB-Cable capture, VB-Cable render master, WASAPI shared): Locked in 20–25 s
+  in 3/3 runs, zero underruns; audio-thread load 3.5–4 % (8 strips, routing, reverb, limiters).
 
 ## 4. The tick
 

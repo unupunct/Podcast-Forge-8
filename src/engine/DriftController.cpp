@@ -23,7 +23,8 @@ void DriftController::prepare(double engineRate, double targetFill, double lockT
     rate_ = engineRate;
     target_ = targetFill;
     lockTol_ = lockToleranceFrames;
-    constexpr double wn = 0.2, zeta = 1.0;
+    const double wn = tuning().wn, zeta = tuning().zeta;
+    tau_ = tuning().filterTau;
     kp_ = 2.0 * zeta * wn / rate_;
     ki_ = wn * wn / rate_;
     reset(0.0);
@@ -44,14 +45,12 @@ void DriftController::reset(double keepPpm) noexcept
 double DriftController::update(double fillFrames, int blockFrames) noexcept
 {
     const double dt = blockFrames / rate_;
-    if (first_)
-    {
-        for (double& s : stages_) s = fillFrames;
-        first_ = false;
-    }
-    // Three cascaded one-pole filters (τ = 0.2 s each): device/engine block beats (tens of Hz)
-    // are attenuated by > 90 dB, while the loop (ωn = 0.2 rad/s) sees little extra phase lag.
-    const double alpha = dt / (0.2 + dt);
+    // The filter starts at the target (reset): bridges prime centred on it, whereas the first raw
+    // sample can sit up to a device period away from the mean and would kick the loop into the clamp.
+    first_ = false;
+    // Three cascaded one-pole filters (τ = 0.1 s each): device/engine block beats (tens of Hz)
+    // are attenuated by > 60 dB, while adding only ~0.3 s of lag to the loop (ωn = 0.2 rad/s).
+    const double alpha = dt / (tau_ + dt);
     double x = fillFrames;
     for (double& s : stages_)
     {

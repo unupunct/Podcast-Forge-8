@@ -7,7 +7,9 @@
 #include "ui/DeviceListView.h"
 #include "ui/DeviceMatrixView.h"
 #include "ui/DspEditor.h"
+#include "ui/MarkersView.h"
 #include "ui/MicWizard.h"
+#include "ui/TransportBar.h"
 #include "ui/LookAndFeel.h"
 #include "ui/MixerView.h"
 #include "ui/RoutingGridView.h"
@@ -52,10 +54,14 @@ public:
     void paint(juce::Graphics&) override;
 
     TopBar& topBar() noexcept { return topBar_; }
+    TransportBar& transport() noexcept { return transport_; }
     juce::TabbedComponent& tabs() noexcept { return tabs_; }
+    void offerRecovery(); // interrupted sessions found at start-up
 
 private:
+    EngineController& controller_;
     TopBar topBar_;
+    TransportBar transport_;
     juce::TabbedComponent tabs_{juce::TabbedButtonBar::TabsAtTop};
     ChannelWindows windows_;
 };

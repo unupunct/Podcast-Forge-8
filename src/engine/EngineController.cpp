@@ -9,6 +9,7 @@
 
 #include "core/Clock.h"
 #include "core/Log.h"
+#include "core/Paths.h"
 #include "core/SettingsDb.h"
 #include "devices/HotplugWatcher.h"
 #include "devices/WinEndpointEnumerator.h"
@@ -49,24 +50,19 @@ public:
 
     void onStreamBlock(float* interleaved, int frames, int, int64_t qpc100ns, uint64_t devicePosition) noexcept override
     {
+        // Callback time; each bridge DLL-filters it into its device's timeline. WASAPI packet
+        // positions/QPC stamps are not used: on real devices they wobble by milliseconds.
+        (void)qpc100ns;
+        (void)devicePosition;
         const int64_t now = monotonicNs();
-        const int64_t hwNs = qpc100ns > 0 ? qpc100ns * 100 : 0;
         if (in)
         {
-            // Capture: qpc is the hardware time of the first frame in the packet.
-            in->deviceWrite(interleaved, frames, hwNs != 0 ? hwNs : now);
-            if (master_) in->driveEngine(controller_.engine_);
+            in->deviceWrite(interleaved, frames, now);
+            if (master_) in->driveEngine(controller_.engine_, now);
         }
         else if (out)
         {
-            // Render: at hwNs the device had played devicePosition frames; this packet starts
-            // after everything submitted so far.
-            int64_t startNs = 0;
-            if (hwNs != 0)
-                startNs = hwNs + static_cast<int64_t>(1e9 * (static_cast<double>(submitted_) - static_cast<double>(devicePosition)) /
-                                                      deviceRate);
-            out->deviceRead(interleaved, frames, now, master_ ? &controller_.engine_ : nullptr, startNs);
-            submitted_ += static_cast<uint64_t>(frames);
+            out->deviceRead(interleaved, frames, now, master_ ? &controller_.engine_ : nullptr);
         }
     }
 
@@ -97,11 +93,36 @@ EngineController::EngineController(Settings settings, SettingsDb* db)
     : settings_(settings), db_(db), engine_(settings.sampleRate, settings.blockFrames)
 {
     assignments_ = Assignments::defaults();
+    recorder_ = std::make_unique<Recorder>(engine_.recordTap(), settings.sampleRate);
+    recordingSettings_.projectDir = paths::defaultProjects() / L"Untitled Project";
     thread_ = std::thread([this] { threadMain(); });
+}
+
+Recorder::Settings EngineController::recorderSettings() const
+{
+    Recorder::Settings s;
+    s.projectDir = recordingSettings_.projectDir;
+    s.format = recordingSettings_.format;
+    s.depth = recordingSettings_.depth;
+    s.recordMain = recordingSettings_.recordMain;
+    const auto a = assignments();
+    for (size_t i = 0; i < 8; ++i)
+    {
+        s.names[i] = a.ch[i].name;
+        s.armed[i] = const_cast<AudioEngine&>(engine_).recordArm(static_cast<int>(i)).load();
+    }
+    return s;
+}
+
+bool EngineController::startRecording(std::string& error)
+{
+    return recorder_->start(recorderSettings(), error);
 }
 
 EngineController::~EngineController()
 {
+    // Finalise any recording first: files must always end valid.
+    if (recorder_) recorder_->stop();
     post([this] {
         hotplug_.reset();
         engine_.stopInternalClock();

@@ -75,10 +75,52 @@ RecoveredTrack recoverWavFile(const std::filesystem::path& file)
     const uint64_t dataStart = dataHeader + 8;
     const uint64_t available = size > dataStart ? size - dataStart : 0;
     // Only whole frames are declared; a trailing partial frame stays in the file, undeclared.
-    const uint64_t dataBytes = available - available % static_cast<uint64_t>(blockAlign);
+    uint64_t dataBytes = available - available % static_cast<uint64_t>(blockAlign);
+    uint64_t fileEnd = dataStart + dataBytes; // where the RIFF content ends
+
+    // A finalised file has chunks after the audio (cue, LIST/adtl). If the declared data size is
+    // followed by well-formed chunks that end exactly at end-of-file, the header is already
+    // consistent: keep it, so trailing metadata is never declared as audio.
+    {
+        uint8_t dh[8];
+        uint64_t declared = 0;
+        if (f.readAt(dataHeader, dh, 8))
+        {
+            declared = rd32(dh + 4);
+            if (declared == 0xFFFFFFFFu && junkPos != 0)
+            {
+                uint8_t ds[36];
+                if (f.readAt(junkPos, ds, 36) && std::memcmp(ds, "ds64", 4) == 0)
+                {
+                    declared = 0;
+                    for (int i = 7; i >= 0; --i) declared = (declared << 8) | ds[16 + i];
+                }
+            }
+        }
+        if (declared > 0 && declared < available && declared % static_cast<uint64_t>(blockAlign) == 0)
+        {
+            uint64_t p = dataStart + declared + (declared & 1);
+            bool wellFormed = p < size;
+            while (wellFormed && p < size)
+            {
+                uint8_t ch[8];
+                if (p + 8 > size || !f.readAt(p, ch, 8)) { wellFormed = false; break; }
+                const bool known = std::memcmp(ch, "cue ", 4) == 0 || std::memcmp(ch, "LIST", 4) == 0 ||
+                                   std::memcmp(ch, "JUNK", 4) == 0 || std::memcmp(ch, "id3 ", 4) == 0;
+                const uint32_t len = rd32(ch + 4);
+                if (!known || p + 8 + len > size) { wellFormed = false; break; }
+                p += 8 + len + (len & 1);
+            }
+            if (wellFormed && p == size)
+            {
+                dataBytes = declared;
+                fileEnd = size; // the trailing chunks belong to the RIFF
+            }
+        }
+    }
     r.frames = dataBytes / static_cast<uint64_t>(blockAlign);
     // (Any cue chunk after the data is lost in a crash; the markers are in Markers.json.)
-    const uint64_t riffSize = dataStart + dataBytes - 8;
+    const uint64_t riffSize = fileEnd - 8;
 
     bool ok;
     if (riffSize < 0xFFFFFFF0ull)

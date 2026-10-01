@@ -40,7 +40,7 @@ Analysis helpers: RMS/peak, Goertzel magnitude at f, cross-correlation lag, disc
 | Routing | Invariants 1–5 from ROUTING.md with impulses; headphone modes; talkback lock |
 | Gain / mute / solo / PFL | Exact gains; ramps have no step > slope; solo/PFL leave Main bit-exact |
 | DSP | The verification targets in DSP.md §6; presets load the documented values |
-| Sync / drift | Devices at +200, −150, +80 ppm for 10 simulated minutes → all `Locked`, fill within ±0.5 block, no underruns, discontinuity detector clean on a 1 kHz sine, and a correlation lag between tracks that is constant ±1 sample |
+| Sync / drift | Devices at +200, −150, +80 ppm for 10 simulated minutes with callback jitter on every device → all `Locked`, no underruns, discontinuity detector clean on a 1 kHz sine, inter-device lag wander ≤ 4 samples (mean constant), 3 ms-jitter stress, DLL accuracy, no PI overshoot. Tuning sweep: `[.diag]` |
 | Recording | Written WAV/BWF/FLAC read back by JUCE equal the ring input (24-bit tolerance); BWF `bext` fields; RF64 switch (simulated at a small threshold) |
 | File recovery | Kill simulation: stop the worker mid-write without a finalise, then `Recovery` → files open, frame count = bytes written, samples untouched |
 | Disk-full | Injectable `IFileSink` returns `ERROR_DISK_FULL` at N bytes → recording continues in memory up to the ring, alert raised, no file deleted, and a "continue elsewhere" call creates `_part2` |

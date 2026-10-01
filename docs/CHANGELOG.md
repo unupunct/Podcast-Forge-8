@@ -139,3 +139,36 @@
 - Limiter delay line one sample too long (73 vs 72): the delayed sample fell outside the look-ahead
   window protecting it. Caught by the latency-passthrough test.
 - Linear bypass crossfade left a slope corner; replaced with a raised cosine.
+
+## Stage 6 — Multitrack recording (2026-10-01)
+
+**Added**
+- `src/record`: `RecordTap` (per-track SPSC rings, all-or-nothing block push), `IFileSink` +
+  `Win32FileSink` (CREATE_NEW only), `WavWriter` (WAV / BWF bext + iXML / RF64 promotion, header
+  patching, cue + labels), `FlacWriter` (JUCE, through the same sink), TPDF-dithered conversion,
+  `Journal` (atomic JSON), `Recovery` (header-only, never touches audio bytes), `MarkerList` with
+  CSV / Audacity / Audition / REAPER exports, session folders with collision suffixes, file-name
+  sanitising, `DiskGuard`, and `Recorder` (worker thread, 2 s checkpoints, write-error retry with
+  audio held in memory, "continue elsewhere" into `_part2` files, pre-roll hand-off for Stage 11).
+- Engine: isolated tracks (post-DSP, pre-fader) delayed by the master-limiter look-ahead so they are
+  sample-aligned with the Main mix; Main recorded post limiter.
+- UI: transport (REC / PAUSE / STOP with confirmation / MARKER, timecode, disk time, dropout and
+  write-error banners, CONTINUE ELSEWHERE) in the tab row; MARKERS dock tab; start-up recovery
+  prompt. CLI: `--recover <session>`.
+
+**Verified**
+- 83 tests + 3 live tests. Round trips in WAV/BWF/FLAC at 16/24/32f, RF64, cue/bext/iXML; crash
+  recovery leaves every audio byte identical; disk-full → continue on another "drive" with every frame
+  accounted for and part 2 continuing the signal exactly; nothing overwritten; tap all-or-nothing and
+  allocation-free; isolated tracks align with Main sample-exactly. Live: a real 3-track session
+  (BRIO, VB-Cable loop, Main) — all tracks exactly 240 000 frames, finalised, zero dropouts.
+
+**Found and fixed during the stage**
+- Disk full mid-frame: the torn frame's prefix was lost when continuing elsewhere → handed over.
+- Recovery on a finalised file declared its trailing cue/label chunks as audio → kept consistent headers.
+- Clock sync, revised from live measurements (systematic debugging): WASAPI packet timestamps wobble by
+  up to ±15 ms on real devices → time bases are now DLL-filtered callback times on both sides of every
+  bridge; start-up re-centring; PI retuned by a measured sweep. Live lock went from "sometimes 35 s,
+  sometimes not in 40 s" to 20–25 s in 3/3 runs with zero underruns. TESTING thresholds for
+  inter-device alignment were changed from 1 to 4 samples to match what the hardware allows
+  (documented in LIMITATIONS.md).

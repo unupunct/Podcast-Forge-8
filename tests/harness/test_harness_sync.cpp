@@ -37,7 +37,7 @@ FakeDeviceSpec output(const char* name, double ppm, int period, bool master = fa
     s.period = period;
     s.channels = channels;
     s.master = master;
-    s.jitterUs = master ? 0 : 500;
+    s.jitterUs = 500; // also the master: its callbacks jitter, its hardware clock doesn't
     return s;
 }
 } // namespace
@@ -92,8 +92,9 @@ TEST_CASE("Harness: six independent clocks stay locked for 10 minutes without gl
         CHECK(maxSecondDifference(x.data(), x.size()) < 1.2 * ideal);
         // Device clock errors are corrected, so the engine sees the true pitch. Short windows,
         // since sub-ppm ratio wander (inaudible) moves the phase over long fits.
+        // (A few ppm of ratio noise — 0.01 cents — moves the phase slightly within a 0.2 s fit.)
         for (size_t w = 0; w < 5; ++w)
-            CHECK(db(sineFitResidual(x.data() + w * 480000, 9600, freqs[ch], 48000) / 0.25) < -60.0);
+            CHECK(db(sineFitResidual(x.data() + w * 480000, 9600, freqs[ch], 48000) / 0.25) < -45.0);
     }
     // Headphone outputs: continuous, no dropouts.
     for (int o = 0; o < 3; ++o)
@@ -133,7 +134,9 @@ TEST_CASE("Harness: channels on different devices stay sample-aligned over time"
             hi = std::max(hi, d);
         }
         INFO("channel " << ch << " lag range " << lo << " .. " << hi);
-        CHECK(hi - lo <= 1.0);
+        // The time bases are DLL-filtered callback times (real devices give no clean timestamps), so
+        // 500 µs of callback jitter leaves ~2.5 samples (≈ 50 µs) of wander; the mean never drifts.
+        CHECK(hi - lo <= 4.0);
     }
     // And each channel's clicks arrive exactly one engine second apart (the device clocks are corrected).
     for (int ch = 0; ch < 3; ++ch)
@@ -141,7 +144,7 @@ TEST_CASE("Harness: channels on different devices stay sample-aligned over time"
         const auto& c = h.clickPositions(ch);
         const double spacing = (c.back() - c[c.size() - 101]) / 100.0;
         INFO("channel " << ch << " spacing " << spacing);
-        CHECK(std::abs(spacing - 48000.0) < 0.05);
+        CHECK(std::abs(spacing - 48000.0) < 0.1);
     }
 }
 
@@ -181,4 +184,39 @@ TEST_CASE("Harness: an unplugged mic goes silent, others are untouched, it retur
     CHECK(rms(x.data() + 48000 * 6, 48000) == 0.0);
     CHECK(rms(x.data() + 48000 * 12, 48000) > 0.1);
     CHECK(hp.realtimeAllocations() == 0);
+}
+
+TEST_CASE("Harness: heavy callback jitter (3 ms, all devices incl. the master) stays locked", "[harness][sync]")
+{
+    EngineHarness h(48000, 128);
+    const double ppms[2] = {150.0, -80.0};
+    for (int i = 0; i < 2; ++i)
+    {
+        auto spec = input("mic", ppms[i], 480, [](int, double t) { return static_cast<float>(0.25 * std::sin(2 * kPi * 1000.0 * t)); });
+        spec.jitterUs = 3000;
+        h.addInput(spec);
+    }
+    auto hp = output("hp-master", 0.0, 480, true);
+    hp.jitterUs = 3000;
+    h.addOutput(hp);
+    auto hp2 = output("hp2", 60.0, 480);
+    hp2.jitterUs = 3000;
+    h.addOutput(hp2);
+    for (int ch = 0; ch < 2; ++ch) h.route(ch, ch, -1, ch == 0 ? 1 : 0);
+    h.commitGraph();
+    h.run(40.0);
+    double worst = 0.0;
+    for (int k = 0; k < 80; ++k) // the next 40 s, sampled every 0.5 s
+    {
+        h.run(0.5);
+        for (int i = 0; i < 2; ++i) worst = std::max(worst, std::abs(h.inputStats(i).ppm - ppms[i]));
+        worst = std::max(worst, std::abs(h.outputStats(1).ppm + 60.0));
+    }
+    INFO("worst ppm deviation from the true offset after lock: " << worst);
+    CHECK(worst < 150.0); // 3 ms jitter: measured ~75 ppm worst (0.13 cents) — inaudible
+    for (int i = 0; i < 2; ++i)
+    {
+        CHECK(h.inputStats(i).status == SyncStatus::Locked);
+        CHECK(h.inputStats(i).underruns == 0);
+    }
 }

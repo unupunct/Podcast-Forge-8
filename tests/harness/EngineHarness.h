@@ -26,6 +26,9 @@ struct FakeDeviceSpec
     double ppm = 0.0;      // device clock error relative to true time
     double jitterUs = 0.0; // uniform callback jitter (±)
     bool master = false;
+    // Extra slowly-varying error (bounded random walk, ± µs) on the time the device's callbacks are
+    // observed at — models the multi-millisecond wobble seen on real WASAPI devices.
+    double timestampNoiseUs = 0.0;
     // Input devices: sample for device channel `ch` at true time `t` (seconds).
     std::function<float(int ch, double t)> signal;
 };
@@ -77,6 +80,7 @@ private:
         std::vector<float> buffer;
         std::vector<float> captured; // outputs: device channel 0
         std::mt19937 rng;            // per-device jitter, so one device's events never perturb another
+        double tsError = 0.0;        // current timestamp error (ns), bounded random walk
     };
     struct Event { double at; int input; bool connect; };
 
