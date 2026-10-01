@@ -35,6 +35,9 @@ AudioEngine::AudioEngine(int sampleRate, int blockFrames)
     routingIn_.fxR = fxR_.data();
     mainLimiter_.prepare(sampleRate_, 2, kMaxBlock);
     cleanLimiter_.prepare(sampleRate_, 2, kMaxBlock);
+    recordDelay_.assign(static_cast<size_t>(kNumChannels) * static_cast<size_t>(mainLimiter_.latency()), 0.0f);
+    recordCh_.assign(static_cast<size_t>(kNumChannels) * kMaxBlock, 0.0f);
+    recordMain_.assign(2 * kMaxBlock, 0.0f);
     busBuffers_.assign(static_cast<size_t>(kBusCount) * 2 * kMaxBlock, 0.0f);
     for (size_t b = 0; b < kBusCount; ++b)
     {
@@ -240,6 +243,54 @@ void AudioEngine::processBlock(int frames, int64_t nowNs) noexcept
         mainLimiter_.process(mainCh, frames, on);
         cleanLimiter_.process(cleanCh, frames, on);
         meters_.masterLimiterGrDb = mainLimiter_.gainReductionDb();
+    }
+
+    // 3c. Recording: isolated tracks (post-DSP, pre-fader, aligned to Main) + Main (post limiter).
+    if (recordTap_.active())
+    {
+        const int L = mainLimiter_.latency();
+        std::array<const float*, kTrackCount> tracks{};
+        for (int ch = 0; ch < kNumChannels; ++ch)
+        {
+            const float* src = channelBuffers_.data() + static_cast<size_t>(ch) * kMaxBlock;
+            float* dst = recordCh_.data() + static_cast<size_t>(ch) * kMaxBlock;
+            float* d = recordDelay_.data() + static_cast<size_t>(ch) * static_cast<size_t>(L);
+            int pos = recordDelayPos_;
+            for (int i = 0; i < frames; ++i)
+            {
+                dst[i] = d[pos];
+                d[pos] = src[i];
+                if (++pos == L) pos = 0;
+            }
+            tracks[static_cast<size_t>(ch)] = dst;
+        }
+        recordDelayPos_ = (recordDelayPos_ + frames) % L;
+        const float* ml = routingOut_.left[idx(BusId::Main)];
+        const float* mr = routingOut_.right[idx(BusId::Main)];
+        for (int i = 0; i < frames; ++i)
+        {
+            recordMain_[static_cast<size_t>(2 * i)] = ml[i];
+            recordMain_[static_cast<size_t>(2 * i + 1)] = mr[i];
+        }
+        tracks[static_cast<size_t>(TrackId::Main)] = recordMain_.data();
+        recordTap_.push(tracks, frames);
+    }
+    else
+    {
+        // Keep the alignment delay primed while idle so the first recorded block is correct.
+        const int L = mainLimiter_.latency();
+        for (int ch = 0; ch < kNumChannels; ++ch)
+        {
+            const float* src = channelBuffers_.data() + static_cast<size_t>(ch) * kMaxBlock;
+            float* d = recordDelay_.data() + static_cast<size_t>(ch) * static_cast<size_t>(L);
+            int pos = recordDelayPos_;
+            for (int i = 0; i < frames; ++i)
+            {
+                d[pos] = src[i];
+                if (++pos == L) pos = 0;
+            }
+        }
+        recordDelayPos_ = (recordDelayPos_ + frames) % L;
     }
     for (size_t b = 0; b < kBusCount; ++b)
     {

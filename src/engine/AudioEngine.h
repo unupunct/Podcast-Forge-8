@@ -20,6 +20,7 @@
 #include "dsp/DspParams.h"
 #include "dsp/Dynamics.h"
 #include "dsp/Reverb.h"
+#include "record/RecordTap.h"
 #include "routing/RoutingEngine.h"
 
 namespace pf8 {
@@ -88,6 +89,9 @@ public:
     size_t readAnalysis(float* dst, size_t max) noexcept { return analysisRing_.pop(dst, max); }
     int dspLatency() const noexcept { return strips_[0].latency(); }
 
+    // Recording hand-off (the recorder configures and activates it).
+    RecordTap& recordTap() noexcept { return recordTap_; }
+
     void tick(int numFrames) noexcept override;
 
 private:
@@ -128,6 +132,12 @@ private:
     dsp::Reverb reverb_;
     std::vector<float> reverbIn_, fxL_, fxR_;
     dsp::Limiter mainLimiter_, cleanLimiter_;
+    RecordTap recordTap_;
+    // Isolated tracks are delayed by the master limiter's look-ahead so they align with Main.
+    std::vector<float> recordDelay_;  // [channel][L]
+    int recordDelayPos_ = 0;
+    std::vector<float> recordCh_;     // [channel][kMaxBlock]
+    std::vector<float> recordMain_;   // interleaved stereo
     std::vector<float> busBuffers_; // [bus][L/R][kMaxBlock]
     RoutingInputs routingIn_{};
     RoutingOutputs routingOut_{};

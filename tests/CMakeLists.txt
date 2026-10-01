@@ -9,12 +9,12 @@ target_compile_definitions(pf8_tests PRIVATE
     PF8_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/data")
 
 set(PF8_TEST_LIBS pf8_core)
-foreach(lib pf8_devices pf8_dsp pf8_routing pf8_engine)
+foreach(lib pf8_devices pf8_dsp pf8_routing pf8_record pf8_engine)
     if(TARGET ${lib})
         list(APPEND PF8_TEST_LIBS ${lib})
     endif()
 endforeach()
-target_link_libraries(pf8_tests PRIVATE ${PF8_TEST_LIBS} Catch2::Catch2WithMain)
+target_link_libraries(pf8_tests PRIVATE ${PF8_TEST_LIBS} pf8_juce Catch2::Catch2WithMain)
 pf8_set_warnings(pf8_tests)
 
 include(${PROJECT_SOURCE_DIR}/third_party/Catch2/extras/Catch.cmake)
