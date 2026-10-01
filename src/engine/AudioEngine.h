@@ -44,6 +44,7 @@ struct EngineMeters
     std::array<float, kNumChannels> hpProtectGrDb{}; // ≤ 0 when the protection limiter acts
     float musicDuckDb = 0.0f;                         // ≤ 0 while ducking
     float monitorProtectGrDb = 0.0f;
+    float talkbackPeak = 0.0f;                       // talkback mic, linear (whether or not the key is down)
 };
 
 // Receives each block's channel buffers (post-input, pre-processing) on the tick thread.
@@ -107,6 +108,7 @@ public:
 private:
     void applyPendingGraph() noexcept;
     void processBlock(int frames, int64_t nowNs) noexcept;
+    void readRoute(const EngineGraph* g, size_t nIn, const ChannelRoute* r, float* dst, int frames) noexcept;
 
     int sampleRate_;
     int blockFrames_;
@@ -159,6 +161,7 @@ private:
     std::vector<float> recordCh_;     // [channel][kMaxBlock]
     std::vector<float> recordMain_;   // interleaved stereo
     std::vector<float> busBuffers_; // [bus][L/R][kMaxBlock]
+    std::vector<float> talkback_;   // mono talkback mic
     RoutingInputs routingIn_{};
     RoutingOutputs routingOut_{};
     std::array<const float*, kNumChannels> channelPtrs_{};

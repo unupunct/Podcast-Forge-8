@@ -12,6 +12,7 @@
 #include "ui/MicWizard.h"
 #include "ui/MusicView.h"
 #include "ui/SoundboardView.h"
+#include "ui/TalkbackView.h"
 #include "ui/TransportBar.h"
 #include "ui/LookAndFeel.h"
 #include "ui/MixerView.h"

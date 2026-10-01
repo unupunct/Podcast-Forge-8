@@ -121,6 +121,8 @@ TEST_CASE("Assignments JSON round-trip", "[devices][identity]")
     as.outputs[static_cast<size_t>(OutputRole::Monitor)].device = identityOf(usbDev("mon", Flow::Render, 7, 7, "M1", true, "Monitors"));
     as.outputs[static_cast<size_t>(OutputRole::CleanStream)].pair = 1;
     as.preferredMaster = "hp-5";
+    as.talkback.mic = identityOf(usbDev("prod", Flow::Capture, 8, 8, "P1", true, "Producer Mic"));
+    as.talkback.micChannel = 1;
     auto back = assignmentsFromJson(toJson(as));
     REQUIRE(back.has_value());
     CHECK(*back == as);

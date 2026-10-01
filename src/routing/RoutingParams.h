@@ -60,6 +60,9 @@ struct RoutingParams
     std::array<std::atomic<bool>, kRoutingChannels> talkbackTarget{};
     AtomicParam talkbackLevel{1.0f};
     std::atomic<bool> talkbackDim{true}; // dim target headphones by −12 dB while talking
+    // Talkback mic: -1 = the dedicated talkback mic (Devices), 0–7 = channel N (post-DSP, pre-fader).
+    std::atomic<int> talkbackSource{-1};
+    AtomicParam talkbackMicGain{1.0f}; // trim on a dedicated talkback mic (linear)
 
     RoutingParams() { applyDefaults(); }
 

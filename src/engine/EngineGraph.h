@@ -39,6 +39,7 @@ struct EngineGraph
     std::vector<std::shared_ptr<InputBridge>> inputs;
     std::vector<std::shared_ptr<OutputBridge>> outputs;
     std::array<ChannelRoute, kNumChannels> channels{};
+    ChannelRoute talkback{}; // dedicated talkback mic (input side only)
     // Extra bus outputs, indexed by BusId. HP buses normally go through ChannelRoute::outputBridge.
     std::array<BusOutput, kBusCount> busOutputs{};
     uint64_t generation = 0;

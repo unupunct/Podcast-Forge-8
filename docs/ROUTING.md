@@ -81,7 +81,10 @@ Defaults for a new project:
 
 ## 5. Talkback
 
-- Source: any assigned input (usually a producer mic) or channel N's mic.
+- Source: a dedicated talkback mic (assigned in the TALKBACK tab, restored by identity like any
+  channel mic, may share an interface with a channel) or channel N's processed mic (pre-fader).
+- Key (`TalkbackKey`): *Hold / tap to latch* (default — hold to talk, a tap shorter than 300 ms
+  latches, the next press releases), *Momentary* or *Latch*.
 - Targets: any subset of HP1–HP8, or All. Target gain in the matrix is set only while the talkback
   key is held (or latched).
 - While talking back, the rest of each target's headphone mix is dimmed by −12 dB ("talkback dim",

@@ -326,6 +326,41 @@ void EngineController::assignOutput(OutputRole role, std::optional<std::string> 
     });
 }
 
+void EngineController::assignTalkbackMic(std::optional<std::string> endpointId, int micChannel)
+{
+    post([this, endpointId, micChannel] {
+        {
+            std::lock_guard lock(stateMutex_);
+            auto& t = assignments_.talkback;
+            t.micChannel = micChannel;
+            if (!endpointId) t.mic.reset();
+            else if (auto d = registry_.find(*endpointId)) t.mic = identityOf(*d);
+        }
+        PF8_LOG_INFO("device", "assign talkback mic id=%s ch=%d", endpointId ? endpointId->c_str() : "none", micChannel);
+        saveAssignments();
+        reconcile();
+    });
+}
+
+namespace {
+int64_t steadyMs()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+} // namespace
+
+void EngineController::talkbackPress()
+{
+    talkbackKey_.press(steadyMs());
+    engine_.routing().talkbackActive = talkbackKey_.active();
+}
+
+void EngineController::talkbackRelease()
+{
+    talkbackKey_.release(steadyMs());
+    engine_.routing().talkbackActive = talkbackKey_.active();
+}
+
 void EngineController::applyAssignments(const Assignments& a)
 {
     post([this, a] {
@@ -485,6 +520,19 @@ void EngineController::reconcile()
         }
     }
 
+    auto tbRes = resolveTalkback(a, devices);
+    if (tbRes.kind == MatchKind::Fingerprint && a.talkback.mic && a.talkback.mic->endpointId != tbRes.endpointId)
+    {
+        if (auto d = registry_.find(tbRes.endpointId)) a.talkback.mic = identityOf(*d);
+        changedIds = true;
+    }
+    if (tbRes.kind == MatchKind::Exact || tbRes.kind == MatchKind::Fingerprint)
+    {
+        auto& n = needed[keyFor(Flow::Capture, tbRes.endpointId)];
+        n.flow = Flow::Capture;
+        n.id = tbRes.endpointId;
+    }
+
     const auto outRes = resolveOutputs(a, devices);
     for (size_t r = 0; r < outRes.size(); ++r)
         if (outRes[r].kind == MatchKind::Exact || outRes[r].kind == MatchKind::Fingerprint)
@@ -570,6 +618,9 @@ void EngineController::reconcile()
             }
             g->channels[i] = route;
         }
+        if (tbRes.kind == MatchKind::Exact || tbRes.kind == MatchKind::Fingerprint)
+            if (auto it = inIdx.find(keyFor(Flow::Capture, tbRes.endpointId)); it != inIdx.end())
+                g->talkback = ChannelRoute{it->second, a.talkback.micChannel, -1, 0};
         static constexpr BusId roleBus[kOutputRoles] = {BusId::Monitor, BusId::Main, BusId::Clean, BusId::MusicOut};
         for (size_t r = 0; r < outRes.size(); ++r)
         {
@@ -622,6 +673,7 @@ void EngineController::reconcile()
         masterKey_ = masterRunning ? masterKey : std::string();
         resolution_ = res;
         outputResolution_ = outRes;
+        talkbackResolution_ = tbRes;
         if (changedIds) assignments_ = a;
     }
     if (masterRunning)
@@ -711,6 +763,8 @@ ControllerStatus EngineController::status() const
     }
     for (size_t r = 0; r < kOutputRoles; ++r)
         view(assignments_.outputs[r].device, outputResolution_[r], Flow::Render, s.outputs[r]);
+    view(assignments_.talkback.mic, talkbackResolution_, Flow::Capture, s.talkback);
+    s.talkbackChannel = assignments_.talkback.micChannel;
     return s;
 }
 

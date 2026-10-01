@@ -156,6 +156,10 @@ std::string toJson(const Assignments& a)
         outs.emplace_back(std::move(j));
     }
     root["outputs"] = std::move(outs);
+    json::Object tb;
+    tb["mic"] = a.talkback.mic ? identityToJson(*a.talkback.mic) : json::Value();
+    tb["micChannel"] = a.talkback.micChannel;
+    root["talkback"] = std::move(tb);
     return json::serialize(json::Value(std::move(root)), true);
 }
 
@@ -181,6 +185,11 @@ std::optional<Assignments> assignmentsFromJson(const std::string& text)
         a.outputs[i].device = identityFromJson(outs[i]["device"]);
         a.outputs[i].pair = outs[i]["pair"].asInt(0);
     }
+    if (const auto& tb = (*v)["talkback"]; tb.isObject())
+    {
+        a.talkback.mic = identityFromJson(tb["mic"]);
+        a.talkback.micChannel = tb["micChannel"].asInt(-1);
+    }
     return a;
 }
 
@@ -190,6 +199,11 @@ std::array<Resolution, kOutputRoles> resolveOutputs(const Assignments& a, const 
     for (size_t i = 0; i < out.size(); ++i)
         if (a.outputs[i].device) out[i] = resolve(*a.outputs[i].device, devices, {});
     return out;
+}
+
+Resolution resolveTalkback(const Assignments& a, const std::vector<DeviceInfo>& devices)
+{
+    return a.talkback.mic ? resolve(*a.talkback.mic, devices, {}) : Resolution{};
 }
 
 std::array<ChannelResolution, 8> resolveAll(const Assignments& a, const std::vector<DeviceInfo>& devices)

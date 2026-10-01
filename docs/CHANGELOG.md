@@ -223,3 +223,19 @@
 - 92 tests incl. ducking timing (attack, hold, release, off), zero RT allocations, playlist streaming
   across 48k / 44.1k files with pitch kept, pause silence, auto-advance without underruns, fade-out;
   58 UI screens.
+
+## Stage 10 — Talkback (2026-10-01)
+
+**Added**
+- Dedicated talkback mic assignment (`Assignments::talkback`, saved/restored by identity like channel
+  mics, Fingerprint re-binding, may share an interface with a channel) and an engine talkback route;
+  or a channel's processed mic as the source. Mic trim, talkback level, `talkbackPeak` meter.
+- `TalkbackKey`: hold-to-talk, tap-to-latch, momentary and latch modes (key repeat ignored).
+- TALKBACK dock tab: big TALK button, key mode, source, mic picker with device state, input
+  channel, trim / level, HP1–HP8 targets with ALL / NONE, dim, and the program lock with a clear
+  LOCKED / OPEN note.
+
+**Verified**
+- 96 tests: key behaviour in all modes; harness — talkback mic reaches only the target headphones,
+  never Main / Clean, disappears on release, zero RT allocations; channel-source talkback; assignment
+  JSON round-trip including the talkback mic. 65 UI screens.

@@ -131,6 +131,8 @@ void EngineHarness::rebuildGraph()
         r.outputBridge = r.outputBridge >= 0 ? outMap[static_cast<size_t>(r.outputBridge)] : -1;
         g->channels[ch] = r;
     }
+    g->talkback = talkbackRoute_;
+    g->talkback.inputBridge = talkbackRoute_.inputBridge >= 0 ? inMap[static_cast<size_t>(talkbackRoute_.inputBridge)] : -1;
     engine_.setGraph(std::move(g));
 }
 

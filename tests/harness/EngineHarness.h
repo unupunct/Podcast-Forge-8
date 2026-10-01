@@ -42,6 +42,7 @@ public:
     int addInput(const FakeDeviceSpec& spec);
     int addOutput(const FakeDeviceSpec& spec);
     void route(int channel, int input, int inputChannel, int output, int pair = 0);
+    void routeTalkback(int input, int inputChannel) { talkbackRoute_ = pf8::ChannelRoute{input, inputChannel, -1, 0}; }
     void commitGraph();
 
     // Simulated hot-plug: the device stops calling back and its bridge leaves the graph; on
@@ -95,6 +96,7 @@ private:
     std::vector<Device> inputs_;
     std::vector<Device> outputs_;
     std::array<pf8::ChannelRoute, pf8::kNumChannels> routes_{};
+    pf8::ChannelRoute talkbackRoute_{};
     std::vector<Event> events_;
     std::array<std::vector<float>, pf8::kNumChannels> channelCapture_;
     std::array<std::vector<double>, pf8::kNumChannels> clicks_;

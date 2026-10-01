@@ -61,6 +61,8 @@ AudioEngine::AudioEngine(int sampleRate, int blockFrames)
         routingOut_.right[b] = busBuffers_.data() + (2 * b + 1) * kMaxBlock;
     }
     for (size_t c = 0; c < kNumChannels; ++c) routingIn_.channel[c] = channelPtrs_[c];
+    talkback_.assign(kMaxBlock, 0.0f);
+    routingIn_.talkback = talkback_.data();
 }
 
 AudioEngine::~AudioEngine() { stopInternalClock(); }
@@ -162,6 +164,29 @@ void AudioEngine::tick(int numFrames) noexcept
     ticking_.clear(std::memory_order_release);
 }
 
+void AudioEngine::readRoute(const EngineGraph* g, size_t nIn, const ChannelRoute* r, float* dst, int frames) noexcept
+{
+    if (!r || r->inputBridge < 0 || static_cast<size_t>(r->inputBridge) >= nIn || !g->inputs[static_cast<size_t>(r->inputBridge)])
+    {
+        std::memset(dst, 0, sizeof(float) * static_cast<size_t>(frames));
+        return;
+    }
+    const int devCh = std::min(g->inputs[static_cast<size_t>(r->inputBridge)]->config().deviceChannels, EngineGraph::kMaxDeviceChannels);
+    float* const* src = &bridgePtrs_[static_cast<size_t>(r->inputBridge) * EngineGraph::kMaxDeviceChannels];
+    if (r->inputChannel >= 0 && r->inputChannel < devCh)
+    {
+        std::memcpy(dst, src[r->inputChannel], sizeof(float) * static_cast<size_t>(frames));
+        return;
+    }
+    const float scale = 1.0f / static_cast<float>(devCh);
+    for (int i = 0; i < frames; ++i)
+    {
+        float v = 0.0f;
+        for (int c = 0; c < devCh; ++c) v += src[c][i];
+        dst[i] = v * scale;
+    }
+}
+
 void AudioEngine::processBlock(int frames, int64_t nowNs) noexcept
 {
     const EngineGraph* g = graph_;
@@ -176,31 +201,7 @@ void AudioEngine::processBlock(int frames, int64_t nowNs) noexcept
     for (int ch = 0; ch < kNumChannels; ++ch)
     {
         float* dst = channelBuffers_.data() + static_cast<size_t>(ch) * kMaxBlock;
-        const ChannelRoute* r = g ? &g->channels[static_cast<size_t>(ch)] : nullptr;
-        if (!r || r->inputBridge < 0 || static_cast<size_t>(r->inputBridge) >= nIn || !g->inputs[static_cast<size_t>(r->inputBridge)])
-        {
-            std::memset(dst, 0, sizeof(float) * static_cast<size_t>(frames));
-        }
-        else
-        {
-            const int devCh = std::min(g->inputs[static_cast<size_t>(r->inputBridge)]->config().deviceChannels,
-                                       EngineGraph::kMaxDeviceChannels);
-            float* const* src = &bridgePtrs_[static_cast<size_t>(r->inputBridge) * EngineGraph::kMaxDeviceChannels];
-            if (r->inputChannel >= 0 && r->inputChannel < devCh)
-            {
-                std::memcpy(dst, src[r->inputChannel], sizeof(float) * static_cast<size_t>(frames));
-            }
-            else
-            {
-                const float scale = 1.0f / static_cast<float>(devCh);
-                for (int i = 0; i < frames; ++i)
-                {
-                    float s = 0.0f;
-                    for (int c = 0; c < devCh; ++c) s += src[c][i];
-                    dst[i] = s * scale;
-                }
-            }
-        }
+        readRoute(g, nIn, g ? &g->channels[static_cast<size_t>(ch)] : nullptr, dst, frames);
 
         // Mic wizard tap: raw input, before trim and processing.
         if (analysisChannel_.load(std::memory_order_relaxed) == ch)
@@ -223,6 +224,23 @@ void AudioEngine::processBlock(int frames, int64_t nowNs) noexcept
     }
 
     if (EngineTap* tap = tap_.load(std::memory_order_acquire)) tap->onChannelBlock(channelPtrs_.data(), kNumChannels, frames);
+
+    // 2a. Talkback mic: the dedicated mic, or a channel's processed (pre-fader) signal.
+    {
+        const auto& rp = routing_.params();
+        const int src = rp.talkbackSource.load(std::memory_order_relaxed);
+        if (src >= 0 && src < kNumChannels)
+            std::memcpy(talkback_.data(), channelPtrs_[static_cast<size_t>(src)], sizeof(float) * static_cast<size_t>(frames));
+        else
+        {
+            readRoute(g, nIn, g ? &g->talkback : nullptr, talkback_.data(), frames);
+            const float trim = std::clamp(rp.talkbackMicGain.get(), 0.0f, 16.0f);
+            for (int i = 0; i < frames; ++i) talkback_[static_cast<size_t>(i)] *= trim;
+        }
+        float pk = 0.0f;
+        for (int i = 0; i < frames; ++i) pk = std::max(pk, std::abs(talkback_[static_cast<size_t>(i)]));
+        meters_.talkbackPeak = pk;
+    }
 
     // 2b. Soundboard → Carts source.
     soundboard_.render(cartsL_.data(), cartsR_.data(), frames);

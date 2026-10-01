@@ -59,10 +59,19 @@ struct OutputAssignment
     bool operator==(const OutputAssignment&) const = default;
 };
 
+// A dedicated talkback mic (producer / director). May share an interface with a channel mic.
+struct TalkbackAssignment
+{
+    std::optional<DeviceIdentity> mic;
+    int micChannel = -1;
+    bool operator==(const TalkbackAssignment&) const = default;
+};
+
 struct Assignments
 {
     std::array<ChannelAssignment, 8> ch;
     std::array<OutputAssignment, kOutputRoles> outputs;
+    TalkbackAssignment talkback;
     std::string preferredMaster; // endpoint id, empty = automatic
     bool operator==(const Assignments&) const = default;
 
@@ -80,5 +89,6 @@ struct ChannelResolution
 };
 std::array<ChannelResolution, 8> resolveAll(const Assignments& a, const std::vector<DeviceInfo>& devices);
 std::array<Resolution, kOutputRoles> resolveOutputs(const Assignments& a, const std::vector<DeviceInfo>& devices);
+Resolution resolveTalkback(const Assignments& a, const std::vector<DeviceInfo>& devices);
 
 } // namespace pf8
