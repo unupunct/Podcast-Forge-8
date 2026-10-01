@@ -92,6 +92,7 @@ MainComponent::MainComponent(EngineController& controller)
     tabs_.addTab("MIXER", colours::background, page, true);
     tabs_.addTab("DEVICE MATRIX", colours::background, new DeviceMatrixView(controller), true);
     tabs_.addTab("DEVICES", colours::background, new DeviceListView(controller), true);
+    tabs_.addTab("DIAGNOSTICS", colours::background, new DiagnosticsView(controller), true);
     addAndMakeVisible(tabs_);
     setSize(1600, 900);
 }

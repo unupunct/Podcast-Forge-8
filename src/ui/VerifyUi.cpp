@@ -179,7 +179,12 @@ VerifyUiResult runVerifyUi(EngineController& controller, const std::filesystem::
             main.setSize(cw, chh);
             // Main tabs, plus every bottom-dock tab of the mixer page.
             struct View { int tab, dock; const char* name; };
-            std::vector<View> views = {{0, 0, "mixer"}, {1, -1, "device-matrix"}, {2, -1, "devices"}};
+            // Every main tab (named after its title), then the mixer page's other dock tabs.
+            std::vector<View> views = {{0, 0, "mixer"}};
+            std::vector<std::string> tabNames;
+            for (int t = 1; t < main.tabs().getNumTabs(); ++t)
+                tabNames.push_back(main.tabs().getTabNames()[t].toLowerCase().replaceCharacter(' ', '-').toStdString());
+            for (int t = 1; t < main.tabs().getNumTabs(); ++t) views.push_back({t, -1, tabNames[static_cast<size_t>(t - 1)].c_str()});
             if (auto* page = dynamic_cast<MixerPage*>(main.tabs().getTabContentComponent(0)))
                 for (int d = 1; d < page->dock().getNumTabs(); ++d)
                     views.push_back({0, d, nullptr});

@@ -19,6 +19,7 @@ add_library(pf8_ui STATIC
     TalkbackView.cpp
     ProjectController.cpp
     HotkeyManager.cpp
+    DiagnosticsView.cpp
     MainWindow.cpp
 )
 target_link_libraries(pf8_ui PUBLIC pf8_juce pf8_project pf8_engine pf8_dsp pf8_media pf8_record pf8_devices pf8_core)
