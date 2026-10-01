@@ -1,6 +1,7 @@
 #include "engine/AudioEngine.h"
 
 #include <algorithm>
+#include <thread>
 #include <cmath>
 #include <cstring>
 
@@ -67,6 +68,23 @@ AudioEngine::AudioEngine(int sampleRate, int blockFrames)
 
 AudioEngine::~AudioEngine() { stopInternalClock(); }
 
+bool AudioEngine::setPrerollSeconds(double seconds)
+{
+    if (recordTap_.active()) return false; // the recorder holds the frozen buffer
+    const double current = prerollOwned_ ? prerollOwned_->seconds() : 0.0;
+    if (seconds == current) return true;
+    // Take the buffer out of the tick, then wait out a tick that may still hold it.
+    preroll_.store(nullptr, std::memory_order_seq_cst);
+    while (ticking_.test(std::memory_order_seq_cst)) std::this_thread::yield();
+    prerollOwned_.reset();
+    if (seconds > 0.0)
+    {
+        prerollOwned_ = std::make_unique<PreRollBuffer>(sampleRate_, seconds);
+        preroll_.store(prerollOwned_.get(), std::memory_order_seq_cst);
+    }
+    return true;
+}
+
 void AudioEngine::setGraph(std::unique_ptr<EngineGraph> graph)
 {
     EngineGraph* raw = graph.get();
@@ -124,7 +142,7 @@ void AudioEngine::applyPendingGraph() noexcept
 
 void AudioEngine::tick(int numFrames) noexcept
 {
-    if (ticking_.test_and_set(std::memory_order_acquire))
+    if (ticking_.test_and_set(std::memory_order_seq_cst)) // seq_cst: setPrerollSeconds waits on it
     {
         skipped_.fetch_add(1, std::memory_order_relaxed);
         return;
@@ -323,7 +341,10 @@ void AudioEngine::processBlock(int frames, int64_t nowNs) noexcept
     }
 
     // 3c. Recording: isolated tracks (post-DSP, pre-fader, aligned to Main) + Main (post limiter).
-    if (recordTap_.active())
+    //     The same tracks feed the pre-roll buffer while no recording runs.
+    const bool recording = recordTap_.active();
+    PreRollBuffer* preroll = preroll_.load(std::memory_order_seq_cst);
+    if (recording || preroll)
     {
         const int L = mainLimiter_.latency();
         std::array<const float*, kTrackCount> tracks{};
@@ -356,7 +377,9 @@ void AudioEngine::processBlock(int frames, int64_t nowNs) noexcept
             recordMusic_[static_cast<size_t>(2 * i + 1)] = musicR_[static_cast<size_t>(i)];
         }
         tracks[static_cast<size_t>(TrackId::Music)] = recordMusic_.data();
-        recordTap_.push(tracks, frames);
+        // Pre-roll first: on the first recorded block it freezes instead of taking the block.
+        if (preroll) preroll->onBlock(tracks, frames, recording);
+        if (recording) recordTap_.push(tracks, frames);
     }
     else
     {

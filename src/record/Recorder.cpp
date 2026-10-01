@@ -152,10 +152,8 @@ bool Recorder::start(const Settings& settings, std::string& error)
         journal_ = Journal{};
         journal_.sampleRate = rate_;
         journal_.startedUtc = journal_.updatedUtc = utcNowIso();
-        journal_.prerollSamples = prerollFrames_;
         journal_.tracks.clear();
         for (const auto& t : tracks_) journal_.tracks.push_back(t.journal);
-        journal_.save(journalPath_);
         writeError_ = false;
         writeErrorText_.clear();
         continueRequest_.reset();
@@ -166,32 +164,55 @@ bool Recorder::start(const Settings& settings, std::string& error)
         markers_.clear();
     }
 
-    // Pre-roll first (sample-contiguous with the live audio that follows).
-    if (prerollFrames_ > 0)
-    {
-        std::lock_guard lock(mutex_);
-        for (auto& t : tracks_)
-            if (!preroll_[static_cast<size_t>(t.id)].empty())
-                t.writer->write(preroll_[static_cast<size_t>(t.id)].data(), static_cast<int>(prerollFrames_));
-        markers_.add(prerollFrames_, "Record pressed");
-    }
-
-    tap_.configure(mask, rate_, settings.ringSeconds);
+    // The tap ring must also hold the live audio that arrives while the worker writes the pre-roll.
+    double ring = settings.ringSeconds;
+    if (prerollSource_ && prerollSource_->capacity() > 0) ring += std::min(20.0, 4.0 + prerollSource_->seconds() / 4.0);
+    tap_.configure(mask, rate_, ring);
     tap_.setPaused(false);
     stopRequested_ = false;
+    prerollFrames_ = 0;
+    prerollActive_ = prerollSource_ && prerollSource_->capacity() > 0 ? prerollSource_ : nullptr;
+    if (prerollActive_) prerollActive_->armCapture();
     state_ = State::Recording;
     tap_.setActive(true);
+    // Pre-roll: the tick freezes it on the first recorded block (sample-contiguous with the live
+    // stream). Wait for that block so marker positions and the journal are right from the start.
+    if (prerollActive_)
+    {
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+        while (!prerollActive_->frozen() && std::chrono::steady_clock::now() < until) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        if (prerollActive_->frozen()) prerollFrames_ = prerollActive_->frozenFrames();
+        else PF8_LOG_WARN("record", "pre-roll: the engine did not tick within 500 ms - recording without pre-roll");
+    }
+    {
+        std::lock_guard lock(mutex_);
+        journal_.prerollSamples = prerollFrames_;
+        journal_.save(journalPath_);
+        if (prerollFrames_ > 0) markers_.add(prerollFrames_, "Record pressed");
+    }
     worker_ = std::thread([this] { workerMain(); });
     PF8_LOG_INFO("record", "record.start session=%s tracks=%zu format=%s bits=%d", session_.string().c_str(), tracks_.size(),
                  toString(settings.format), static_cast<int>(settings.depth));
     return true;
 }
 
-void Recorder::setPreroll(std::array<std::vector<float>, kTrackCount> data, uint64_t frames)
+void Recorder::writePreroll()
 {
+    const uint64_t total = prerollFrames_.load();
+    if (!prerollActive_ || total == 0) return;
     std::lock_guard lock(mutex_);
-    preroll_ = std::move(data);
-    prerollFrames_ = frames;
+    for (auto& t : tracks_)
+    {
+        const int chunk = static_cast<int>(drainBuffer_.size() / static_cast<size_t>(t.channels));
+        for (uint64_t done = 0; done < total;)
+        {
+            const int n = static_cast<int>(std::min<uint64_t>(static_cast<uint64_t>(chunk), total - done));
+            prerollActive_->read(t.id, done, n, drainBuffer_.data());
+            if (const auto e = t.writer->write(drainBuffer_.data(), n); e != SinkError::None) noteError(e, t.journal.file);
+            done += static_cast<uint64_t>(n);
+        }
+    }
+    PF8_LOG_INFO("record", "pre-roll written frames=%llu", static_cast<unsigned long long>(total));
 }
 
 void Recorder::pause()
@@ -231,7 +252,8 @@ void Recorder::stop()
     if (worker_.joinable()) worker_.join();
     state_ = State::Idle;
     prerollFrames_ = 0;
-    for (auto& p : preroll_) p.clear();
+    if (prerollActive_) prerollActive_->release();
+    prerollActive_ = nullptr;
 }
 
 void Recorder::noteError(SinkError e, const std::string& what)
@@ -409,6 +431,7 @@ bool Recorder::continueElsewhere(const std::filesystem::path& dir, std::string& 
 
 void Recorder::workerMain()
 {
+    writePreroll(); // before any live audio: the files start with the pre-roll
     auto nextCheckpoint = std::chrono::steady_clock::now() + kCheckpoint;
     auto nextRetry = std::chrono::steady_clock::now() + kRetry;
     std::mutex waitMutex;

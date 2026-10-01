@@ -28,10 +28,12 @@ private:
     void timerCallback() override;
     void beginRecording();
     void continueElsewhere();
+    void applyPreroll();
 
     EngineController& controller_;
     juce::TextButton rec_{"REC"}, pause_{"PAUSE"}, stop_{"STOP"}, marker_{"MARKER"}, elsewhere_{"CONTINUE ELSEWHERE..."};
     juce::Label time_, info_;
+    juce::ComboBox preroll_;
     Recorder::Status status_;
     int blink_ = 0;
     std::unique_ptr<juce::FileChooser> chooser_;

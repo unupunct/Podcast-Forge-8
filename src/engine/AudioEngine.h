@@ -23,6 +23,7 @@
 #include "dsp/Ducker.h"
 #include "media/MusicPlayer.h"
 #include "media/Soundboard.h"
+#include "record/PreRollBuffer.h"
 #include "record/RecordTap.h"
 #include "routing/RoutingEngine.h"
 
@@ -98,6 +99,9 @@ public:
 
     // Recording hand-off (the recorder configures and activates it).
     RecordTap& recordTap() noexcept { return recordTap_; }
+    // Pre-record buffer (control thread): 0 = off (freed). Fails while a recording runs.
+    bool setPrerollSeconds(double seconds);
+    PreRollBuffer* preroll() noexcept { return prerollOwned_.get(); }
     Soundboard& soundboard() noexcept { return soundboard_; }
     MusicPlayer& music() noexcept { return *music_; }
     dsp::DuckerParams& ducker() noexcept { return duckerParams_; }
@@ -148,6 +152,8 @@ private:
     std::array<dsp::Limiter, kNumChannels> hpLimiters_; // hearing protection per headphone feed
     dsp::Limiter monitorLimiter_;
     RecordTap recordTap_;
+    std::unique_ptr<PreRollBuffer> prerollOwned_; // control thread
+    std::atomic<PreRollBuffer*> preroll_{nullptr}; // what the tick uses
     Soundboard soundboard_{48000};
     std::vector<float> cartsL_, cartsR_;
     std::unique_ptr<MusicPlayer> music_;

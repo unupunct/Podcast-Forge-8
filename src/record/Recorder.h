@@ -18,6 +18,7 @@
 #include "record/FileSink.h"
 #include "record/Journal.h"
 #include "record/Markers.h"
+#include "record/PreRollBuffer.h"
 #include "record/RecordTap.h"
 #include "record/TrackWriter.h"
 #include "record/WavWriter.h"
@@ -41,7 +42,6 @@ public:
         std::string description;
         uint64_t rf64Threshold = WavWriter::kDefaultRf64Threshold; // test hook
         double ringSeconds = 2.0;
-        uint64_t prerollFrames = 0; // written before the live audio (Stage 11)
     };
 
     struct Status
@@ -87,8 +87,10 @@ public:
     Status status() const;
     State state() const noexcept { return state_.load(); }
 
-    // Pre-roll hand-off: frames to write before live audio, per track (Stage 11 fills these).
-    void setPreroll(std::array<std::vector<float>, kTrackCount> data, uint64_t frames);
+    // Pre-roll source for the next start() (nullptr = none). The buffer must outlive the recording;
+    // the recorder freezes it at RECORD, writes its frames first, and releases it on stop().
+    void setPrerollSource(PreRollBuffer* buffer) noexcept { prerollSource_ = buffer; }
+    uint64_t prerollFrames() const noexcept { return prerollFrames_; }
 
 private:
     struct Track
@@ -129,8 +131,10 @@ private:
     uint64_t lastBytes_ = 0;
     std::chrono::steady_clock::time_point lastRateTime_{};
     DiskEstimate disk_;
-    std::array<std::vector<float>, kTrackCount> preroll_;
-    uint64_t prerollFrames_ = 0;
+    void writePreroll();
+    PreRollBuffer* prerollSource_ = nullptr;
+    PreRollBuffer* prerollActive_ = nullptr; // the buffer frozen for the current recording
+    std::atomic<uint64_t> prerollFrames_{0};
 
     MarkerList markers_;
     std::thread worker_;

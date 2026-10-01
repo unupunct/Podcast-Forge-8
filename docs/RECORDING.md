@@ -87,13 +87,20 @@ banner with the count. Live audio is never affected.
 
 ## 7. Pre-roll
 
-`PreRollBuffer`: per-track circular float buffer of `N` seconds (5/10/30/60), allocated when the user
-enables pre-roll (worst case 60 s × 15 channels — 8 mono mics, 3 stereo tracks, 1 mono remote —
-× 48 kHz × 4 bytes ≈ 173 MB; the UI shows the memory cost).
-When disabled, it's freed. On RECORD: the recorder snapshots the ring's write index at the RECORD block,
-writes the `N` seconds before it, then the live stream: sample-contiguous (tested). Marker times
-and the timecode are relative to the start of the file, so the pre-roll starts at 00:00:00 and RECORD
-is at 00:00:N (a `record-pressed` marker is added).
+`PreRollBuffer`: per-track circular float buffer of `N` seconds (5/10/30/60, transport bar), allocated
+when the user enables pre-roll and freed when it is turned off (the engine takes it out of the tick
+and waits out an in-flight tick before freeing). It holds every recordable track whether armed or
+not — CH1–CH8 (mono), Main and Music (stereo): 12 channels, 60 s × 48 kHz × 4 bytes ≈ 138 MB; the
+tooltip shows the cost.
+
+Contiguity: the tick reads the tap state once per block. On the first block the tap is active, the
+buffer *freezes instead of taking that block*, and the block goes to the tap — so the last pre-roll
+frame and the first live frame are adjacent samples (tested sample-exactly with a counter signal).
+`Recorder::start` waits for that block (≤ 500 ms; without a tick it records without pre-roll and
+logs it), so the journal's `prerollSamples` and a `Record pressed` marker at `N` s are right from
+the start. The worker writes the frozen frames first, then drains the live stream; the tap ring is
+enlarged while it does. On STOP the buffer restarts empty. Marker times and the timecode are
+relative to the start of the file, so the pre-roll starts at 00:00:00.
 
 ## 8. Markers
 

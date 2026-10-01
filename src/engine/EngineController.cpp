@@ -117,6 +117,7 @@ Recorder::Settings EngineController::recorderSettings() const
 
 bool EngineController::startRecording(std::string& error)
 {
+    recorder_->setPrerollSource(engine_.preroll());
     return recorder_->start(recorderSettings(), error);
 }
 

@@ -239,3 +239,19 @@
 - 96 tests: key behaviour in all modes; harness — talkback mic reaches only the target headphones,
   never Main / Clean, disappears on release, zero RT allocations; channel-source talkback; assignment
   JSON round-trip including the talkback mic. 65 UI screens.
+
+## Stage 11 — Pre-record buffer (2026-10-01)
+
+**Added**
+- `PreRollBuffer` (5 / 10 / 30 / 60 s) fed by the tick with every recordable track; freezes on the
+  first recorded block so pre-roll and live audio are sample-contiguous; restarts empty after STOP.
+- Engine `setPrerollSeconds` (safe hand-over from the tick before freeing); recorder writes the
+  pre-roll first, adds a `Record pressed` marker, journals `prerollSamples`, enlarges the tap ring
+  meanwhile. `Recorder::setPreroll(data)` replaced by `setPrerollSource`.
+- Transport bar: PRE-ROLL selector (memory cost in the tooltip), fill indicator while idle,
+  "incl. N s pre-roll" while recording.
+
+**Verified**
+- 99 tests: buffer wrap / freeze / release; every sample of every file continues a counter signal
+  across the pre-roll → live joint (two takes); journal and marker positions; engine feeds it with
+  zero RT allocations and runs on without it. 65 UI screens.
