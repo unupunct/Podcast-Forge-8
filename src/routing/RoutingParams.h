@@ -25,6 +25,9 @@ struct HeadphoneParams
     AtomicParam volume{1.0f};
     std::atomic<bool> mute{false};
     std::atomic<bool> preFader{true}; // channel sends taken before the channel fader
+    // Hearing protection: a brick-wall limiter on this headphone feed (0.5 ms look-ahead).
+    std::atomic<bool> protectOn{true};
+    AtomicParam protectCeilingDb{-6.0f}; // −24 … 0 dBFS
 };
 
 struct MonitorParams
@@ -36,6 +39,8 @@ struct MonitorParams
     std::atomic<bool> dim{false};
     AtomicParam dimGain{0.1f};       // −20 dB
     std::atomic<bool> mono{false};
+    // Maximum-volume protection for the operator monitor (always on; ceiling configurable).
+    AtomicParam maxCeilingDb{-3.0f}; // −24 … 0 dBFS
 };
 
 struct RoutingParams

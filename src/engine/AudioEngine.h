@@ -38,6 +38,8 @@ struct EngineMeters
     bool anySolo = false, anyPfl = false;
     std::array<dsp::StripMeters, kNumChannels> strip{};     // gate / comp / de-ess / limiter activity
     float masterLimiterGrDb = 0.0f;
+    std::array<float, kNumChannels> hpProtectGrDb{}; // ≤ 0 when the protection limiter acts
+    float monitorProtectGrDb = 0.0f;
 };
 
 // Receives each block's channel buffers (post-input, pre-processing) on the tick thread.
@@ -134,6 +136,8 @@ private:
     dsp::Reverb reverb_;
     std::vector<float> reverbIn_, fxL_, fxR_;
     dsp::Limiter mainLimiter_, cleanLimiter_;
+    std::array<dsp::Limiter, kNumChannels> hpLimiters_; // hearing protection per headphone feed
+    dsp::Limiter monitorLimiter_;
     RecordTap recordTap_;
     // Isolated tracks are delayed by the master limiter's look-ahead so they align with Main.
     std::vector<float> recordDelay_;  // [channel][L]

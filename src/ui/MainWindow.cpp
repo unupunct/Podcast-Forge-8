@@ -10,6 +10,7 @@ MixerPage::MixerPage(EngineController& controller) : mixer_(controller)
     dock_.setTabBarDepth(28);
     dock_.setOutline(0);
     dock_.addTab("ROUTING", colours::background, new RoutingGridView(controller), true);
+    dock_.addTab("HEADPHONES", colours::background, new HeadphonesView(controller), true);
     dock_.addTab("MARKERS", colours::background, new MarkersView(controller), true);
     addAndMakeVisible(dock_);
 }

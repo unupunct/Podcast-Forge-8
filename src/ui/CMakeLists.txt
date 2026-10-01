@@ -13,6 +13,7 @@ add_library(pf8_ui STATIC
     MicWizard.cpp
     TransportBar.cpp
     MarkersView.cpp
+    HeadphonesView.cpp
     MainWindow.cpp
 )
 target_link_libraries(pf8_ui PUBLIC pf8_juce pf8_engine pf8_dsp pf8_record pf8_devices pf8_core)

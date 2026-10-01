@@ -170,7 +170,6 @@ VerifyUiResult runVerifyUi(EngineController& controller, const std::filesystem::
     {
         MainComponent main(controller);
         main.setVisible(true);
-        const char* tabNames[] = {"mixer", "device-matrix", "devices"};
         for (const auto& cfg : kConfigs)
         {
             const int lw = static_cast<int>(static_cast<float>(cfg.w) / cfg.scale);
@@ -178,14 +177,27 @@ VerifyUiResult runVerifyUi(EngineController& controller, const std::filesystem::
             // Maximised window content: minus borders, title bar and taskbar.
             const int cw = juce::jmax(1280, lw - 16), chh = juce::jmax(720, lh - 90);
             main.setSize(cw, chh);
-            for (int tab = 0; tab < 3; ++tab)
+            // Main tabs, plus every bottom-dock tab of the mixer page.
+            struct View { int tab, dock; const char* name; };
+            std::vector<View> views = {{0, 0, "mixer"}, {1, -1, "device-matrix"}, {2, -1, "devices"}};
+            if (auto* page = dynamic_cast<MixerPage*>(main.tabs().getTabContentComponent(0)))
+                for (int d = 1; d < page->dock().getNumTabs(); ++d)
+                    views.push_back({0, d, nullptr});
+            for (size_t vi = 0; vi < views.size(); ++vi)
             {
+                const int tab = views[vi].tab;
                 main.tabs().setCurrentTabIndex(tab, false);
+                std::string viewName = views[vi].name ? views[vi].name : "";
+                if (auto* page = dynamic_cast<MixerPage*>(main.tabs().getTabContentComponent(0)); page && views[vi].dock >= 0)
+                {
+                    page->dock().setCurrentTabIndex(views[vi].dock, false);
+                    if (viewName.empty()) viewName = "mixer-" + page->dock().getTabNames()[views[vi].dock].toLowerCase().toStdString();
+                }
                 main.resized();
                 if (auto* page = main.tabs().getCurrentContentComponent()) page->resized();
                 std::vector<std::string> issues;
                 check(main, "", issues);
-                const std::string tag = std::string(tabNames[tab]) + "_" + std::to_string(cfg.w) + "x" + std::to_string(cfg.h) + "@" +
+                const std::string tag = viewName + "_" + std::to_string(cfg.w) + "x" + std::to_string(cfg.h) + "@" +
                                         std::to_string(static_cast<int>(cfg.scale * 100)) + "pct";
                 for (auto& i : issues) result.issues.push_back(tag + ": " + i);
 

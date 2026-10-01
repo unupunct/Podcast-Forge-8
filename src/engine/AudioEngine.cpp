@@ -35,6 +35,8 @@ AudioEngine::AudioEngine(int sampleRate, int blockFrames)
     routingIn_.fxR = fxR_.data();
     mainLimiter_.prepare(sampleRate_, 2, kMaxBlock);
     cleanLimiter_.prepare(sampleRate_, 2, kMaxBlock);
+    for (auto& l : hpLimiters_) l.prepare(sampleRate_, 2, kMaxBlock, 0.5, 80.0);
+    monitorLimiter_.prepare(sampleRate_, 2, kMaxBlock, 0.5, 80.0);
     recordDelay_.assign(static_cast<size_t>(kNumChannels) * static_cast<size_t>(mainLimiter_.latency()), 0.0f);
     recordCh_.assign(static_cast<size_t>(kNumChannels) * kMaxBlock, 0.0f);
     recordMain_.assign(2 * kMaxBlock, 0.0f);
@@ -247,6 +249,26 @@ void AudioEngine::processBlock(int frames, int64_t nowNs) noexcept
         mainLimiter_.process(mainCh, frames, on);
         cleanLimiter_.process(cleanCh, frames, on);
         meters_.masterLimiterGrDb = mainLimiter_.gainReductionDb();
+    }
+
+    // 3b'. Hearing protection on every headphone feed and on the operator monitor.
+    {
+        auto& rp = routing_.params();
+        for (int hp = 0; hp < kNumChannels; ++hp)
+        {
+            const auto& p = rp.headphones[static_cast<size_t>(hp)];
+            auto& lim = hpLimiters_[static_cast<size_t>(hp)];
+            lim.setCeilingDb(std::clamp(p.protectCeilingDb.get(), -24.0f, 0.0f));
+            const auto bus = static_cast<size_t>(hpBus(hp));
+            float* ch[2] = {routingOut_.left[bus], routingOut_.right[bus]};
+            lim.process(ch, frames, p.protectOn.load(std::memory_order_relaxed));
+            meters_.hpProtectGrDb[static_cast<size_t>(hp)] = lim.gainReductionDb();
+        }
+        monitorLimiter_.setCeilingDb(std::clamp(rp.monitor.maxCeilingDb.get(), -24.0f, 0.0f));
+        const auto mon = static_cast<size_t>(idx(BusId::Monitor));
+        float* mch[2] = {routingOut_.left[mon], routingOut_.right[mon]};
+        monitorLimiter_.process(mch, frames, true);
+        meters_.monitorProtectGrDb = monitorLimiter_.gainReductionDb();
     }
 
     // 3c. Recording: isolated tracks (post-DSP, pre-fader, aligned to Main) + Main (post limiter).

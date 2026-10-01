@@ -7,6 +7,7 @@
 #include "ui/DeviceListView.h"
 #include "ui/DeviceMatrixView.h"
 #include "ui/DspEditor.h"
+#include "ui/HeadphonesView.h"
 #include "ui/MarkersView.h"
 #include "ui/MicWizard.h"
 #include "ui/TransportBar.h"

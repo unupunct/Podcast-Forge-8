@@ -172,3 +172,19 @@
   sometimes not in 40 s" to 20–25 s in 3/3 runs with zero underruns. TESTING thresholds for
   inter-device alignment were changed from 1 to 4 samples to match what the hardware allows
   (documented in LIMITATIONS.md).
+
+## Stage 7 — Headphone mixes (2026-10-01)
+
+**Added**
+- Hearing protection: a brick-wall limiter (0.5 ms look-ahead, ceiling −6 dBFS by default,
+  selectable 0 … −20 dB) on every headphone feed, and maximum-volume protection (−3 dBFS) on the
+  operator monitor. Gain-reduction meters for both.
+- HEADPHONES dock tab: eight personal mixes — mode (Main mix / Personal / Custom), volume, mute,
+  protection ceiling, live PROTECT indicator, 12 draggable send bars (CH 1–8, Music, Carts, Remote,
+  Reverb; double-click toggles), PERSONAL resets to the template. Sends switch to two compact
+  columns when the dock is short.
+- `--verify-ui` renders every bottom-dock tab (44 screens).
+
+**Verified**
+- +12 dB of overload into a headphone feed comes out at exactly the −6 dBFS ceiling (limited, not
+  muted); the monitor ceiling holds. 84 tests, 44 UI screens.

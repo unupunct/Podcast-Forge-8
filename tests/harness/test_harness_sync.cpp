@@ -220,3 +220,31 @@ TEST_CASE("Harness: heavy callback jitter (3 ms, all devices incl. the master) s
         CHECK(h.inputStats(i).underruns == 0);
     }
 }
+
+TEST_CASE("Headphone and monitor protection limiters never exceed their ceilings", "[harness][headphones]")
+{
+    EngineHarness h(48000, 128);
+    auto hot = input("mic", 0.0, 480, [](int, double t) { return static_cast<float>(0.99 * std::sin(2 * kPi * 300.0 * t)); });
+    hot.jitterUs = 0;
+    h.addInput(hot);
+    auto hp = output("hp-master", 0.0, 480, true);
+    hp.jitterUs = 0;
+    h.addOutput(hp);
+    h.route(0, 0, -1, 0);
+    auto& rp = h.engine().routing();
+    for (int c = 0; c < kNumChannels; ++c) h.engine().dsp(c).limiterOn = false;
+    h.engine().masterDsp().limiterOn = false;
+    rp.headphones[0].volume.set(4.0f);            // +12 dB: way over full scale
+    rp.headphones[0].protectCeilingDb.set(-6.0f);
+    rp.monitor.volume.set(4.0f);
+    rp.monitor.maxCeilingDb.set(-3.0f);
+    h.commitGraph();
+    h.captureFrom(2.0);
+    h.run(4.0);
+    const auto& y = h.outputCapture(0); // HP 1 on the master output, left
+    REQUIRE(y.size() > 48000);
+    CHECK(peak(y.data(), y.size()) <= std::pow(10.0, -6.0 / 20.0) + 1e-6);
+    CHECK(peak(y.data(), y.size()) > std::pow(10.0, -6.5 / 20.0)); // limiting, not muting
+    CHECK(h.engine().meters().hpProtectGrDb[0] < -10.0f);
+    CHECK(h.engine().meters().monitorProtectGrDb < -6.0f);
+}
