@@ -7,6 +7,18 @@ ducking, talkback, and continuous drift correction between independently clocked
 
 <p align="center"><img src="resources/icon-256.png" width="96" alt="Podcast Forge 8 icon"></p>
 
+![Mixer: eight channel strips, master section and the routing matrix](assets/mixer.png)
+
+<details>
+<summary>More screens</summary>
+
+![Device matrix: every mic and headphone bound to its channel by identity](assets/device-matrix.png)
+
+![Diagnostics: per-stream sync, drift and xruns, watchdog, glitch log](assets/diagnostics.png)
+
+The screenshots are the app's own offscreen renders (`--verify-ui`) with demo devices shown OFFLINE.
+</details>
+
 ## Features
 
 - **8 mics × 8 headphones, one per person**: every USB device runs on its own clock; one device is
