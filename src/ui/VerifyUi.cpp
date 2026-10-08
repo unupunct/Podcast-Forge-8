@@ -236,6 +236,58 @@ VerifyUiResult runVerifyUi(EngineController& controller, const std::filesystem::
             }
         }
     }
+    // Fewer devices: only channels with a mic get a strip, only mixes with headphones a panel.
+    // Mics on CH1, CH2, CH4, CH7 (not contiguous on purpose), headphones on CH1, CH4, CH7.
+    {
+        auto a = sampleAssignments();
+        for (int i : {2, 4, 5, 7}) a.ch[static_cast<size_t>(i)].mic.reset();
+        for (int i : {1, 2, 4, 5, 7}) a.ch[static_cast<size_t>(i)].headphones.reset();
+        controller.applyAssignments(a);
+        controller.waitIdle();
+        MainComponent main(controller);
+        main.setVisible(true);
+        auto* page = dynamic_cast<MixerPage*>(main.tabs().getTabContentComponent(0));
+        int hpDock = -1;
+        for (int d = 0; page && d < page->dock().getNumTabs(); ++d)
+            if (page->dock().getTabNames()[d] == "HEADPHONES") hpDock = d;
+        for (const auto& cfg : kConfigs)
+        {
+            const int lw = static_cast<int>(static_cast<float>(cfg.w) / cfg.scale);
+            const int lh = static_cast<int>(static_cast<float>(cfg.h) / cfg.scale);
+            main.setSize(juce::jmax(1280, lw - 16), juce::jmax(720, lh - 90));
+            main.tabs().setCurrentTabIndex(0, false);
+            if (!page) break;
+            page->mixer().refresh();
+            if (page->mixer().visibleCount() != 4)
+                result.issues.push_back("4-mic layout shows " + std::to_string(page->mixer().visibleCount()) + " channel strips, expected 4");
+            for (const char* view : {"mixer-4mics", "mixer-headphones-3hp"})
+            {
+                page->dock().setCurrentTabIndex(std::string(view) == "mixer-4mics" ? 0 : std::max(0, hpDock), false);
+                main.resized();
+                page->resized();
+                std::vector<std::string> issues;
+                check(main, "", issues);
+                const std::string tag = std::string(view) + "_" + std::to_string(cfg.w) + "x" + std::to_string(cfg.h) + "@" +
+                                        std::to_string(static_cast<int>(cfg.scale * 100)) + "pct";
+                for (auto& i : issues) result.issues.push_back(tag + ": " + i);
+                auto image = main.createComponentSnapshot(main.getLocalBounds(), true, cfg.scale);
+                juce::File jf(juce::String((outDir / (tag + ".png")).wstring().c_str()));
+                jf.deleteFile(); // our own verification output
+                if (auto stream = jf.createOutputStream())
+                {
+                    juce::PNGImageFormat png;
+                    png.writeImageToStream(image, *stream);
+                }
+                ++result.screensRendered;
+                json::Object s;
+                s["screen"] = tag;
+                s["issues"] = static_cast<int>(issues.size());
+                screens.emplace_back(std::move(s));
+            }
+        }
+        controller.applyAssignments(sampleAssignments());
+        controller.waitIdle();
+    }
     // Dialog screens at their minimum and typical sizes, at every scale.
     {
         struct Dlg { const char* name; int w, h; };

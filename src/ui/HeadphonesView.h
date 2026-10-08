@@ -7,6 +7,7 @@
 
 #include "engine/EngineController.h"
 #include "ui/LookAndFeel.h"
+#include "ui/UiPrefs.h"
 #include "ui/Widgets.h"
 
 namespace pf8::ui {
@@ -58,6 +59,7 @@ private:
     void timerCallback() override;
     EngineController& controller_;
     std::array<std::unique_ptr<HpPanel>, kNumChannels> panels_;
+    std::array<bool, kNumChannels> visible_{};
 };
 
 } // namespace pf8::ui

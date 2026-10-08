@@ -15,6 +15,7 @@ struct AppSettings
     double uiScale = 1.0;       // 1.0 … 2.0
     bool debugLog = false;
     bool rawStreams = true;     // bypass Windows audio effects
+    bool showAllChannels = false; // false: only channels with a mic (mixer) / headphones (HP tab)
 
     static AppSettings load(const SettingsDb* db); // invalid / missing values → defaults
     bool save(SettingsDb* db) const;

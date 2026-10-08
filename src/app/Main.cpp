@@ -12,6 +12,7 @@
 #include "engine/EngineController.h"
 #include "project/AppSettings.h"
 #include "ui/MainWindow.h"
+#include "ui/UiPrefs.h"
 #include "ui/VerifyUi.h"
 
 namespace pf8 {
@@ -75,6 +76,7 @@ public:
         es.blockFrames = app.blockFrames;
         es.mode = app.mode;
         es.raw = app.rawStreams;
+        ui::uiPrefs().showAllChannels = app.showAllChannels;
         PF8_LOG_INFO("app", "engine rate=%d block=%d mode=%d", es.sampleRate, es.blockFrames, static_cast<int>(es.mode));
         controller_ = std::make_unique<EngineController>(es, settings_.isOpen() ? &settings_ : nullptr);
         controller_->start();

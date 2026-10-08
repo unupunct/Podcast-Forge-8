@@ -225,7 +225,23 @@ void HeadphonesView::timerCallback()
 {
     const auto s = controller_.status();
     const auto m = controller_.meters();
-    for (auto& p : panels_) p->update(s, m);
+    // Only mixes that have headphones assigned (all eight when none is, or "Show all 8 channels").
+    std::array<bool, kNumChannels> v{};
+    bool any = false;
+    for (int i = 0; i < kNumChannels; ++i)
+    {
+        v[static_cast<size_t>(i)] = s.channels[static_cast<size_t>(i)].headphones.state != EndpointState::None;
+        any = any || v[static_cast<size_t>(i)];
+    }
+    if (uiPrefs().showAllChannels.load() || !any) v.fill(true);
+    if (v != visible_)
+    {
+        visible_ = v;
+        for (int i = 0; i < kNumChannels; ++i) panels_[static_cast<size_t>(i)]->setVisible(visible_[static_cast<size_t>(i)]);
+        resized();
+    }
+    for (int i = 0; i < kNumChannels; ++i)
+        if (visible_[static_cast<size_t>(i)]) panels_[static_cast<size_t>(i)]->update(s, m);
 }
 
 void HeadphonesView::paint(juce::Graphics& g) { g.fillAll(colours::background); }
@@ -233,10 +249,19 @@ void HeadphonesView::paint(juce::Graphics& g) { g.fillAll(colours::background); 
 void HeadphonesView::resized()
 {
     auto b = getLocalBounds().reduced(6);
-    const float w = static_cast<float>(b.getWidth()) / kNumChannels;
+    int n = 0;
+    for (bool x : visible_) n += x ? 1 : 0;
+    // Wider panels with fewer mixes, at most twice the 8-mix width.
+    const float unit = static_cast<float>(b.getWidth()) / kNumChannels;
+    const float w = std::min(static_cast<float>(b.getWidth()) / static_cast<float>(std::max(1, n)), unit * 2.0f);
+    int slot = 0;
     for (int i = 0; i < kNumChannels; ++i)
-        panels_[static_cast<size_t>(i)]->setBounds(juce::Rectangle<int>(b.getX() + static_cast<int>(w * static_cast<float>(i)), b.getY(),
+    {
+        if (!visible_[static_cast<size_t>(i)]) continue;
+        panels_[static_cast<size_t>(i)]->setBounds(juce::Rectangle<int>(b.getX() + static_cast<int>(w * static_cast<float>(slot)), b.getY(),
                                                                         static_cast<int>(w), b.getHeight()).reduced(3, 0));
+        ++slot;
+    }
 }
 
 } // namespace pf8::ui

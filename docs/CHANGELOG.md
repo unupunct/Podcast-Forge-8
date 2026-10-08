@@ -369,3 +369,20 @@ was shown to fail on the old code where practical.
 
 **Verified**
 - 119 tests, 128 UI screens, live tests 3/3, `--e2e --seconds=60` twice: PASS, no warnings.
+## 1.1.0 - Channels follow the connected devices (2026-10-08)
+
+**Changed**
+- The mixer shows a channel strip only for channels that have a microphone assigned; an assigned
+  mic that is unplugged keeps its strip (OFFLINE) so the problem stays visible. With no mic assigned
+  yet all eight are shown. Strips get wider with fewer channels (at most 1.6x).
+- The HEADPHONES tab shows only mixes that have headphones assigned (same fallback).
+- Settings -> Appearance -> "Show all 8" (saved) brings back the full 8-channel console.
+- Channels without a microphone (or test source) skip all processing in the engine and record no
+  file: 4 mics give 4 channel files instead of 8 with 4 silent ones. A channel's DSP starts clean
+  when a mic arrives.
+
+**Verified**
+- 120 tests (new: recording arms only channels with a source); verify-ui 142 screens including a
+  4-mic / 3-headphone layout on non-contiguous channels (CH1, 2, 4, 7), which also caught a
+  short-circuit bug in the visibility code before release; live tests 3/3; `--e2e --seconds=60`:
+  PASS, now 7 channel files for 7 sources (CH8 has headphones only).

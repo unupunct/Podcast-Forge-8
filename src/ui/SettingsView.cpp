@@ -1,5 +1,7 @@
 #include "ui/SettingsView.h"
 
+#include "ui/UiPrefs.h"
+
 #include <cmath>
 
 #include "core/Log.h"
@@ -487,6 +489,14 @@ public:
                                           juce::Desktop::getInstance().setGlobalScaleFactor(static_cast<float>(st.uiScale));
                                       })},
             "On top of the Windows display scaling. Applies immediately.");
+        row("Channels shown", {&toggle("SHOW ALL 8", uiPrefs().showAllChannels.load(), [this](bool on) {
+                uiPrefs().showAllChannels = on;
+                auto st = AppSettings::load(c_.settingsDb());
+                st.showAllChannels = on;
+                st.save(c_.settingsDb());
+            })},
+            "Off (default): the mixer shows only channels with a microphone assigned (an unplugged one stays, marked OFFLINE) and "
+            "the HEADPHONES tab only mixes with headphones. Channels without a microphone use no processing and record no file.");
         row("Theme", {&info("Dark studio theme (high contrast, colour-coded functions: mute red, solo yellow, PFL teal)")});
     }
 

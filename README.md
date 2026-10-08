@@ -21,6 +21,10 @@ The screenshots are the app's own offscreen renders (`--verify-ui`) with demo de
 
 ## Features
 
+- **Only what's connected**: with 4 mics the mixer shows 4 channel strips (an assigned mic that is
+  unplugged stays visible, marked OFFLINE), only those channels are processed and recorded, and the
+  HEADPHONES tab lists only mixes with headphones. *Settings → Appearance → Show all 8* restores the
+  full console.
 - **8 mics × 8 headphones, one per person**: every USB device runs on its own clock; one device is
   the master and every other one is resampled continuously (PI-controlled, ±1000 ppm), so nothing
   drifts apart over a 3-hour show. Devices are remembered by Windows endpoint ID and USB serial —

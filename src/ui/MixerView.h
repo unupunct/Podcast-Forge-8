@@ -23,11 +23,17 @@ public:
     ChannelStripView& strip(int i) { return *strips_[static_cast<size_t>(i)]; }
     std::function<void(int channel)> onConfigureChannel;
 
+    // Which channels get a strip: those with a microphone assigned (an unplugged one stays, shown
+    // OFFLINE), all eight when none is assigned yet or when "Show all 8 channels" is on.
+    static std::array<bool, kNumChannels> visibleChannels(const ControllerStatus& s, bool showAll);
+    int visibleCount() const;
+
 private:
     void timerCallback() override { refresh(); }
 
     EngineController& controller_;
     std::array<std::unique_ptr<ChannelStripView>, kNumChannels> strips_;
+    std::array<bool, kNumChannels> visible_{};
     MasterStripView master_;
 };
 

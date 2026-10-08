@@ -120,6 +120,20 @@ TEST_CASE("Hotkeys: dispatcher: press actions, holds, repeats and focus loss", "
     CHECK(cancelled.back() == coughAction(2));
 }
 
+TEST_CASE("Recording arms only channels that have a microphone (or a test source)", "[project][record]")
+{
+    // 4 mics → 4 channel files, not 8 with 4 silent ones.
+    EngineController c(EngineController::Settings{}, nullptr);
+    auto s = c.recorderSettings();
+    for (bool armed : s.armed) CHECK_FALSE(armed); // nothing assigned
+    c.engine().setSimulatedSource(2, 440.0f, 0.1f);
+    c.engine().setSimulatedSource(5, 550.0f, 0.1f);
+    s = c.recorderSettings();
+    for (int i = 0; i < kNumChannels; ++i) CHECK(s.armed[static_cast<size_t>(i)] == (i == 2 || i == 5));
+    c.engine().recordArm(5) = false; // the user's REC switch still applies
+    CHECK_FALSE(c.recorderSettings().armed[5]);
+}
+
 TEST_CASE("TalkbackKey: a forced release never latches", "[hotkeys][talkback]")
 {
     // Regression: losing focus within 300 ms of pressing the talkback key counted as a tap and left

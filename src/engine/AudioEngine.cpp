@@ -228,8 +228,25 @@ void AudioEngine::processBlock(int frames, int64_t nowNs) noexcept
     {
         float* dst = channelBuffers_.data() + static_cast<size_t>(ch) * kMaxBlock;
         const ChannelRoute* route = g ? &g->channels[static_cast<size_t>(ch)] : nullptr;
+        const bool hasInput = route && route->inputBridge >= 0 && static_cast<size_t>(route->inputBridge) < nIn;
+        const float simHz = simHz_[static_cast<size_t>(ch)].get();
+        if (!hasInput && simHz <= 0.0f)
+        {
+            // No mic on this channel: no DSP at all (silence in, silence out, meters at zero).
+            std::memset(dst, 0, sizeof(float) * static_cast<size_t>(frames));
+            channelIdle_[static_cast<size_t>(ch)] = true;
+            meters_.peak[static_cast<size_t>(ch)] = meters_.rms[static_cast<size_t>(ch)] = 0.0f;
+            meters_.strip[static_cast<size_t>(ch)] = {};
+            continue;
+        }
+        if (channelIdle_[static_cast<size_t>(ch)])
+        {
+            // A mic arrived: start the strip clean (no filter / look-ahead state from before).
+            strips_[static_cast<size_t>(ch)].reset();
+            channelIdle_[static_cast<size_t>(ch)] = false;
+        }
         readRoute(g, nIn, route, dst, frames);
-        if (const float hz = simHz_[static_cast<size_t>(ch)].get(); hz > 0.0f && (!route || route->inputBridge < 0))
+        if (const float hz = simHz; hz > 0.0f && !hasInput)
         {
             const float level = simLevel_[static_cast<size_t>(ch)].get();
             double& ph = simPhase_[static_cast<size_t>(ch)];

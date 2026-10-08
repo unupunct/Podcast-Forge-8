@@ -108,6 +108,7 @@ public:
     dsp::DuckerParams& ducker() noexcept { return duckerParams_; }
     // Simulated source on a channel without a device (end-to-end test, --e2e): a sine at `hz`
     // (0 = off) and `level` (linear). Ignored while the channel has a real input.
+    bool hasSimulatedSource(int channel) const noexcept { return simHz_[static_cast<size_t>(channel)].get() > 0.0f; }
     void setSimulatedSource(int channel, float hz, float level) noexcept
     {
         simLevel_[static_cast<size_t>(channel)].set(level);
@@ -179,6 +180,7 @@ private:
     std::vector<float> talkback_;   // mono talkback mic
     std::array<AtomicParam, kNumChannels> simHz_, simLevel_; // 0 = off
     std::array<double, kNumChannels> simPhase_{};
+    std::array<bool, kNumChannels> channelIdle_{}; // tick thread: no input last block (DSP skipped)
     RoutingInputs routingIn_{};
     RoutingOutputs routingOut_{};
     std::array<const float*, kNumChannels> channelPtrs_{};

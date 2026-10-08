@@ -114,7 +114,10 @@ Recorder::Settings EngineController::recorderSettings() const
     for (size_t i = 0; i < 8; ++i)
     {
         s.names[i] = a.ch[i].name;
-        s.armed[i] = const_cast<AudioEngine&>(engine_).recordArm(static_cast<int>(i)).load();
+        // Only channels that have a microphone get a file (4 mics → 4 tracks, not 4 silent extras).
+        // An assigned mic that is unplugged right now still records: it may come back mid-show.
+        const bool hasSource = a.ch[i].mic.has_value() || engine_.hasSimulatedSource(static_cast<int>(i));
+        s.armed[i] = hasSource && const_cast<AudioEngine&>(engine_).recordArm(static_cast<int>(i)).load();
     }
     return s;
 }
